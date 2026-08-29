@@ -58,6 +58,12 @@ h1{font-family:"Black Han Sans","IBM Plex Sans KR",sans-serif; font-weight:400; 
 .sub[aria-selected="true"]{background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
 .sub small{opacity:.7; font-weight:400; margin-left:4px}
 
+/* variant toggle (앱/웹, 웹툰/웹소설) */
+.varnav{display:inline-flex; gap:3px; background:var(--surface-2); border:1px solid var(--border); border-radius:11px; padding:3px; margin-bottom:14px}
+.var{border:0; background:transparent; color:var(--muted); font-family:inherit; font-weight:600; font-size:13px; padding:6px 17px; border-radius:8px; cursor:pointer; transition:.13s}
+.var:hover{color:var(--ink)}
+.var[aria-selected="true"]{background:var(--surface); color:var(--accent); box-shadow:var(--shadow)}
+
 .tiles{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:14px}
 @media(max-width:760px){.tiles{grid-template-columns:repeat(2,1fr)}}
 .tile{background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:14px 15px; box-shadow:var(--shadow)}
