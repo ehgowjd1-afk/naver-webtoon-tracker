@@ -2,23 +2,23 @@
 <html lang="ko">
 <head>
 <meta charset="utf-8">
-<title>이번 주 웹툰 랭킹</title>
+<title>네이버웹툰 랭킹</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="네이버웹툰 이번 주 웹툰 랭킹 트래커 — 전체 100 / 여성·남성 50, 순위 변동·연속 기록·신작 진입을 매주 기록합니다.">
+<meta name="description" content="네이버웹툰·시리즈 랭킹 트래커 — 앱 주간(전체/여성/남성) · 요일별 · 장르별 · 시리즈 일/주/월. 순위 변동·연속·신작 진입을 매주 기록합니다.">
 <meta name="color-scheme" content="light dark">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=1">
+<link rel="stylesheet" href="style.css?v=2">
 </head>
 <body>
 <div class="wrap">
   <header>
     <div>
-      <p class="eyebrow">네이버웹툰 · 주간 랭킹 트래커</p>
-      <h1>이번 주 웹툰 랭킹</h1>
-      <p class="meta"><b id="metadate">—</b> 기준 · <b id="metaweek">—</b> · <span id="metacat">전체 TOP 100</span></p>
+      <p class="eyebrow">네이버웹툰 · 시리즈 랭킹 트래커</p>
+      <h1>네이버웹툰 랭킹</h1>
+      <p class="meta" id="meta">—</p>
     </div>
     <div class="htools">
       <select class="wsel" id="wsel" aria-label="주차 선택"></select>
@@ -26,16 +26,17 @@
     </div>
   </header>
 
-  <div class="cats" id="cats" role="tablist"></div>
-  <section class="tiles" id="tiles"></section>
+  <nav class="srcnav" id="srcnav" role="tablist" aria-label="랭킹 소스"></nav>
+  <div class="subnav" id="subnav" role="tablist" aria-label="세부 선택"></div>
 
-  <section class="panels">
+  <section class="tiles" id="tiles" hidden></section>
+  <section class="panels" id="panels" hidden>
     <div class="panel" aria-label="순위 변동 분포">
-      <div class="lab">이번 주 순위 변동</div>
+      <div class="lab">순위 변동 분포</div>
       <div class="bar" id="distbar"></div>
       <div class="dleg" id="distleg"></div>
     </div>
-    <div class="panel" aria-label="여성 vs 남성 온도차">
+    <div class="panel" id="gapPanel" aria-label="여성 vs 남성 온도차">
       <div class="lab">여성 ↔ 남성 취향 온도차</div>
       <p class="gaphint" id="gaphint"></p>
       <div class="gap" id="gap"></div>
@@ -55,10 +56,19 @@
   <ol class="board" id="board"><li class="empty">불러오는 중…</li></ol>
 
   <footer>
-    <p style="margin:0 0 6px"><b>이번 주 웹툰 랭킹</b>은 앱 전용 데이터라 매주 캡처로 수집합니다. 주차가 쌓이면 각 작품의 <b>순위 추이·최장 연속·재진입 이력</b> 시계열 분석이 붙습니다.</p>
-    <p style="margin:0; color:var(--faint)">상승=빨강 / 하락=파랑 (한국 관례) · 출처: 네이버웹툰 앱 「이번 주 웹툰 랭킹」 (전체 100 / 여성 50 / 남성 50)</p>
+    <p style="margin:0 0 6px"><b>앱 주간</b>(전체/여성/남성)은 앱 전용이라 매주 캡처로 수집하고, <b>요일별·장르별·시리즈</b>는 공개 API에서 <b>매일 자동 수집</b>됩니다.</p>
+    <p style="margin:0; color:var(--faint)">상승=빨강 / 하락=파랑 (한국 관례) · 순위를 누르면 작품 상세 · 출처: 네이버웹툰 · 네이버 시리즈</p>
   </footer>
 </div>
-<script src="app.js?v=1"></script>
+
+<div class="modal" id="modal" hidden>
+  <div class="modal-back" id="modalBack"></div>
+  <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <button class="modal-x" id="modalX" aria-label="닫기">✕</button>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<script src="app.js?v=2"></script>
 </body>
 </html>
