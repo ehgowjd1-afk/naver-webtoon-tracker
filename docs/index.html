@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>이번 주 웹툰 랭킹</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="네이버웹툰 이번 주 웹툰 랭킹 트래커 — 전체 100 / 여성·남성 50, 순위 변동·연속 기록·신작 진입을 매주 기록합니다.">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📈</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css?v=1">
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <p class="eyebrow">네이버웹툰 · 주간 랭킹 트래커</p>
+      <h1>이번 주 웹툰 랭킹</h1>
+      <p class="meta"><b id="metadate">—</b> 기준 · <b id="metaweek">—</b> · <span id="metacat">전체 TOP 100</span></p>
+    </div>
+    <div class="htools">
+      <select class="wsel" id="wsel" aria-label="주차 선택"></select>
+      <button class="themebtn" id="tbtn" aria-label="테마 전환" title="라이트/다크 전환">◐</button>
+    </div>
+  </header>
+
+  <div class="cats" id="cats" role="tablist"></div>
+  <section class="tiles" id="tiles"></section>
+
+  <section class="panels">
+    <div class="panel" aria-label="순위 변동 분포">
+      <div class="lab">이번 주 순위 변동</div>
+      <div class="bar" id="distbar"></div>
+      <div class="dleg" id="distleg"></div>
+    </div>
+    <div class="panel" aria-label="여성 vs 남성 온도차">
+      <div class="lab">여성 ↔ 남성 취향 온도차</div>
+      <p class="gaphint" id="gaphint"></p>
+      <div class="gap" id="gap"></div>
+    </div>
+  </section>
+
+  <div class="controls">
+    <div class="search">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+      <input id="q" type="search" placeholder="작품·작가 검색" autocomplete="off">
+    </div>
+    <div class="chips" id="filters" role="group" aria-label="필터"></div>
+    <div class="chips" id="sorts" role="group" aria-label="정렬"></div>
+  </div>
+
+  <p class="count" id="count"></p>
+  <ol class="board" id="board"><li class="empty">불러오는 중…</li></ol>
+
+  <footer>
+    <p style="margin:0 0 6px"><b>이번 주 웹툰 랭킹</b>은 앱 전용 데이터라 매주 캡처로 수집합니다. 주차가 쌓이면 각 작품의 <b>순위 추이·최장 연속·재진입 이력</b> 시계열 분석이 붙습니다.</p>
+    <p style="margin:0; color:var(--faint)">상승=빨강 / 하락=파랑 (한국 관례) · 출처: 네이버웹툰 앱 「이번 주 웹툰 랭킹」 (전체 100 / 여성 50 / 남성 50)</p>
+  </footer>
+</div>
+<script src="app.js?v=1"></script>
+</body>
+</html>
