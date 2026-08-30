@@ -12,8 +12,9 @@ const GENRES = ["HISTORICAL","FANTASY","ACTION","DRAMA","PURE","SENSIBILITY","DA
 const PERIODS = ["DAILY","WEEKLY","MONTHLY"];
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const idL = {};   // titleId -> [name, thumb, author]
-const nameL = {}; // name -> titleId
+const idL = {};    // titleId -> [name, thumb, author]
+const nameL = {};  // name -> titleId
+const stars = {};  // titleId -> starScore
 
 async function getJSON(url, ref){ const r = await fetch(url, { headers:{ "User-Agent":UA_PC, "Referer":ref||"https://comic.naver.com/" } }); if(!r.ok) throw new Error(url+" "+r.status); return r.json(); }
 async function getText(url, ua, ref){ const r = await fetch(url, { headers:{ "User-Agent":ua, "Referer":ref } }); if(!r.ok) throw new Error(url+" "+r.status); return r.text(); }
@@ -25,6 +26,7 @@ function mapWeb(list){
     const th=t.thumbnailUrl||"";
     if(t.titleId && !idL[t.titleId]) idL[t.titleId]=[t.titleName, th, t.author||""];
     if(t.titleName && !nameL[t.titleName]) nameL[t.titleName]=t.titleId;
+    if(t.titleId!=null && t.starScore!=null) stars[t.titleId]=Math.round(t.starScore*100)/100;
     return { r:i+1, t:t.titleName, a:t.author||"", b, id:t.titleId, th };
   });
 }
@@ -76,7 +78,7 @@ async function series(kind){ // kind: comic | novel
 async function collectDetails(existing){
   const details = existing || {};
   const ids = Object.keys(idL).map(Number);
-  const todo = ids.filter(id => !details[id]);
+  const todo = ids.filter(id => !details[id] || details[id].ep === undefined); // 신규 or 스키마 미충족
   console.log("details:", todo.length, "신규 / ", ids.length, "전체");
   const CONC = 4;
   for(let i=0;i<todo.length;i+=CONC){
@@ -85,6 +87,8 @@ async function collectDetails(existing){
         const d = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`);
         const tags = d.curationTagList || [];
         const cpName = (d.gfpAdCustomParam||{}).cpName || "";
+        let ep = 0;
+        try { const al = await getJSON(`https://comic.naver.com/api/article/list?titleId=${id}&page=1`, `https://comic.naver.com/webtoon/list?titleId=${id}`); ep = al.totalCount || 0; } catch(e){}
         details[id] = {
           g: (tags.find(t=>/GENRE/.test(t.curationType))||{}).tagName || "",
           k: tags.filter(t=>t.curationType==="CUSTOM_TAG").map(t=>t.tagName),
@@ -92,6 +96,8 @@ async function collectDetails(existing){
           age: (d.age&&d.age.description) || "",
           day: d.publishDescription || "",
           fav: d.favoriteCount || 0,
+          ep,
+          dailyplus: ((d.gfpAdCustomParam||{}).dailyPlusYn === "Y"),
           syn: (d.synopsis||"").replace(/\s+/g," ").trim().slice(0,220),
           novel: tags.some(t=>t.curationType==="NOVEL_ORIGIN")
         };
@@ -100,6 +106,32 @@ async function collectDetails(existing){
     await sleep(50);
   }
   return details;
+}
+
+/* 순위 추이 누적: history.json = {dates:[...], series:{basisKey:{id:[rank aligned to dates]}}} (최근 45일) */
+function buildTodayBases(web_wd, app_wd, web_gn, app_gn, s_comic, s_novel){
+  const b = {}, put = (key, arr) => { b[key] = Object.fromEntries((arr||[]).map(r => [r.id, r.r])); };
+  for(const w of WEEKDAYS){ put("wd_web_"+w, web_wd[w]); put("wd_app_"+w, app_wd[w]); }
+  for(const g of GENRES){ put("gn_web_"+g, web_gn[g]); put("gn_app_"+g, app_gn[g]); }
+  for(const p of PERIODS){ put("series_comic_"+p, s_comic[p]); put("series_novel_"+p, s_novel[p]); }
+  return b;
+}
+function updateHistory(hist, date, todayBases){
+  if(!hist || !Array.isArray(hist.dates)) hist = { dates:[], series:{} };
+  if(hist.dates[hist.dates.length-1] === date){ // 같은 날 재실행 → 마지막 덮어쓰기
+    hist.dates.pop();
+    for(const bk in hist.series) for(const id in hist.series[bk]) hist.series[bk][id].pop();
+  }
+  hist.dates.push(date); const di = hist.dates.length - 1;
+  for(const [bk, ranks] of Object.entries(todayBases)){
+    const S = hist.series[bk] || (hist.series[bk] = {});
+    for(const id in S){ while(S[id].length < di) S[id].push(null); }
+    for(const [id, rank] of Object.entries(ranks)){ if(!S[id]) S[id] = new Array(di).fill(null); S[id][di] = rank; }
+    for(const id in S){ if(S[id].length <= di) S[id].push(null); }
+  }
+  const MAX = 45;
+  if(hist.dates.length > MAX){ const cut = hist.dates.length - MAX; hist.dates.splice(0, cut); for(const bk in hist.series) for(const id in hist.series[bk]) hist.series[bk][id].splice(0, cut); }
+  return hist;
 }
 
 function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(0,10); }
@@ -115,13 +147,19 @@ function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(
   let existingDetails = {};
   try { existingDetails = JSON.parse(fs.readFileSync(path.join(OUT,"details.json"),"utf8")); } catch(e){}
   const details = await collectDetails(existingDetails);
+  for(const id in stars){ if(details[id]) details[id].star = stars[id]; } // 평균별점 매일 갱신
+
+  let hist = {};
+  try { hist = JSON.parse(fs.readFileSync(path.join(OUT,"history.json"),"utf8")); } catch(e){}
+  hist = updateHistory(hist, date, buildTodayBases(web_wd, app_wd, web_gn, app_gn, s_comic, s_novel));
 
   fs.writeFileSync(path.join(OUT,"weekday.json"), JSON.stringify({ updated, date, web:web_wd, app:app_wd }));
   fs.writeFileSync(path.join(OUT,"genre.json"), JSON.stringify({ updated, date, web:web_gn, app:app_gn }));
   fs.writeFileSync(path.join(OUT,"series.json"), JSON.stringify({ updated, date, comic:s_comic, novel:s_novel }));
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
   fs.writeFileSync(path.join(OUT,"details.json"), JSON.stringify(details));
+  fs.writeFileSync(path.join(OUT,"history.json"), JSON.stringify(hist));
 
   const c=o=>Object.fromEntries(Object.entries(o).map(([k,v])=>[k,v.length]));
-  console.log("done:", JSON.stringify({ web_wd:c(web_wd), app_wd:c(app_wd), web_gn:c(web_gn), app_gn:c(app_gn), comic:c(s_comic), novel:c(s_novel), lookup:Object.keys(idL).length, details:Object.keys(details).length }));
+  console.log("done:", JSON.stringify({ web_wd:c(web_wd), app_wd:c(app_wd), comic:c(s_comic), novel:c(s_novel), details:Object.keys(details).length, histDates:hist.dates.length, histBases:Object.keys(hist.series).length }));
 })().catch(e=>{ console.error("FAILED:",e); process.exit(1); });

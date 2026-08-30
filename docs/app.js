@@ -8,6 +8,8 @@ const PERIODS = [["DAILY","일간"],["WEEKLY","주간"],["MONTHLY","월간"]];
 let APP=null, WEEKDAY=null, GENRE=null, SERIES=null, LOOKUP={id:{},name:{}}, WEEKS=[];
 let src="app", variant=null, sub="전체", fMode="all", sMode="rank", query="";
 let rowsCache=[];
+let DETAILS=null, detailsLoading=null, HISTORY=null, historyLoading=null, KWINDEX=null;
+const DAILYPLUS=new Set();
 
 const F_MOVE=[["all","전체"],["up","상승"],["down","하락"]];
 const F_APP=[["all","전체"],["up","상승"],["down","하락"],["new","신작·진입"],["streak","연속기록"],["rest","휴재"]];
@@ -39,6 +41,7 @@ async function boot(){
   GENRE=R[2].status==="fulfilled"?R[2].value:{date:"",web:{},app:{}};
   SERIES=R[3].status==="fulfilled"?R[3].value:{date:"",comic:{},novel:{}};
   LOOKUP=R[4].status==="fulfilled"?R[4].value:{id:{},name:{}};
+  try{ for(const v of ["web","app"]) (WEEKDAY[v]&&WEEKDAY[v].dailyPlus||[]).forEach(r=>DAILYPLUS.add(r.id)); }catch(e){}
 
   const wsel=document.getElementById("wsel");
   wsel.innerHTML=WEEKS.slice().reverse().map(w=>`<option value="${w}">${dot(w)}</option>`).join("");
@@ -140,6 +143,7 @@ function moveHtml(m){
 }
 function badgeHtml(d){
   let h=""; const b=d.b||[];
+  if(DAILYPLUS.has(d.id)) h+=`<span class="badge b-daily">매일+</span>`;
   if(d.s>0) h+=`<span class="badge b-streak">${d.r===1?"연속 "+d.s+"주 1위":"연속 "+d.s+"주"}</span>`;
   if(b.includes("1위탈환")) h+=`<span class="badge b-enter">1위 탈환</span>`;
   if(b.includes("신작")) h+=`<span class="badge b-new">신작</span>`;
@@ -184,20 +188,54 @@ function urlFor(d){
   if(SOURCES[src].caps.series) return d.id?`https://series.naver.com/${variant}/detail.series?productNo=${d.id}`:searchUrl(d.name);
   return d.id?`https://comic.naver.com/webtoon/list?titleId=${d.id}`:searchUrl(d.name);
 }
-let DETAILS=null, detailsLoading=null;
-function ensureDetails(){ if(DETAILS) return Promise.resolve(DETAILS); if(!detailsLoading) detailsLoading=fetchJSON("data/details.json").then(d=>DETAILS=d).catch(()=>DETAILS={}); return detailsLoading; }
+function ensureDetails(){ if(DETAILS) return Promise.resolve(DETAILS); if(!detailsLoading) detailsLoading=fetchJSON("data/details.json").then(d=>{DETAILS=d; buildKwIndex(); return d;}).catch(()=>DETAILS={}); return detailsLoading; }
+function ensureHistory(){ if(HISTORY) return Promise.resolve(HISTORY); if(!historyLoading) historyLoading=fetchJSON("data/history.json").then(h=>HISTORY=h).catch(()=>HISTORY={dates:[],series:{}}); return historyLoading; }
+function buildKwIndex(){ KWINDEX={}; for(const id in DETAILS){ for(const kw of (DETAILS[id].k||[])){ (KWINDEX[kw]||(KWINDEX[kw]=[])).push(Number(id)); } } }
+
 function detailHtml(det){
   const info=[];
-  if(det.g) info.push(["장르", det.g]);
+  if(det.g) info.push(["장르", det.g + (det.dailyplus?" · 매일+":"")]);
   if(det.cp) info.push(["제작사", det.cp]);
   const publish=[det.day,det.age].filter(Boolean).join(" · "); if(publish) info.push(["연재", publish]);
+  if(det.star) info.push(["평균 별점", "★ "+det.star]);
+  if(det.ep) info.push(["회차", det.ep+"화"]);
   if(det.fav) info.push(["관심", det.fav.toLocaleString()+"명"]);
   let h="";
   if(info.length) h+=`<div class="mrows">`+info.map(([k,v])=>`<div class="mrow"><span class="mk">${k}</span><span class="mv">${esc(v)}</span></div>`).join("")+`</div>`;
   const kws=(det.k||[]).slice(); if(det.novel) kws.push("소설원작");
-  if(kws.length) h+=`<div class="mkw">`+kws.map(t=>`<span class="kw">#${esc(t)}</span>`).join("")+`</div>`;
+  if(kws.length) h+=`<div class="mkw">`+kws.map(t=>`<button class="kw kwbtn" data-kw="${esc(t)}">#${esc(t)}</button>`).join("")+`</div>`;
   if(det.syn) h+=`<p class="msyn">${esc(det.syn)}</p>`;
   return h;
+}
+/* 순위 추이 스파크라인 (rank 배열 → svg) */
+function sparkSvg(ranks){
+  const pts=ranks.map((v,i)=>[i,v]).filter(p=>p[1]!=null);
+  if(pts.length<2) return "";
+  const W=64,H=20,maxR=Math.max(...pts.map(p=>p[1])),minR=Math.min(...pts.map(p=>p[1]));
+  const n=ranks.length-1||1, span=(maxR-minR)||1;
+  const xy=pts.map(([i,v])=>[ (i/n)*(W-2)+1, ((v-minR)/span)*(H-4)+2 ]); // 순위 낮을수록 위
+  const d="M"+xy.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" L");
+  const last=xy[xy.length-1];
+  return `<svg class="spark" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="1.5"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="2" fill="var(--accent)"/></svg>`;
+}
+/* 기준별 순위(겹치는 순위) — 이 작품이 오른 모든 랭킹 + 스파크라인 */
+function crossBasisHtml(d, isSeries){
+  const findRank=(rows,byId)=>{ if(!rows)return null; const row=byId?rows.find(r=>r.id===d.id):rows.find(r=>r.t===d.name); return row?row.r:null; };
+  const E=[];
+  if(isSeries){
+    for(const [p,pl] of PERIODS){ const r=findRank(SERIES[variant]&&SERIES[variant][p],true); if(r) E.push([`${variant==="comic"?"웹툰":"웹소설"} ${pl}`, `series_${variant}_${p}`, r]); }
+  } else {
+    for(const c of ["전체","여성","남성"]){ const r=findRank(APP&&APP.charts[c],false); if(r) E.push([`앱주간 ${c}`, `app_${c}`, r]); }
+    for(const [w,wl] of WEEKDAYS) for(const v of ["web","app"]){ const r=findRank(WEEKDAY[v]&&WEEKDAY[v][w],true); if(r) E.push([`요일 ${v==="app"?"앱":"웹"} ${wl}`, `wd_${v}_${w}`, r]); }
+    for(const [g,gl] of GENRES) for(const v of ["web","app"]){ const r=findRank(GENRE[v]&&GENRE[v][g],true); if(r) E.push([`장르 ${v==="app"?"앱":"웹"} ${gl}`, `gn_${v}_${g}`, r]); }
+  }
+  if(!E.length) return "";
+  const rows=E.map(([label,key,rank])=>{
+    const hist=HISTORY&&HISTORY.series[key]&&HISTORY.series[key][d.id];
+    const spark=hist?sparkSvg(hist):"";
+    return `<div class="xrow"><span class="xlab">${esc(label)}</span>${spark}<span class="xrk">${rank}위</span></div>`;
+  }).join("");
+  return `<div class="xbasis"><div class="xhead">기준별 순위 · 추이</div>${rows}</div>`;
 }
 function openModal(d){
   const url=urlFor(d), caps=SOURCES[src].caps;
@@ -215,18 +253,64 @@ function openModal(d){
       </div>
     </div>
     <div class="mdetail" id="mdetail">${webtoon?'<div class="mloading">상세 불러오는 중…</div>':""}</div>
+    <div id="mcross"></div>
     <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
   document.getElementById("modal").hidden=false;
-  if(webtoon) ensureDetails().then(D=>{ const el=document.getElementById("mdetail"); if(el) el.innerHTML = D[d.id]?detailHtml(D[d.id]):'<div class="mloading">상세 정보 없음</div>'; });
+  Promise.all([webtoon?ensureDetails():Promise.resolve(), ensureHistory()]).then(()=>{
+    if(webtoon){ const el=document.getElementById("mdetail"); if(el) el.innerHTML = (DETAILS[d.id]?detailHtml(DETAILS[d.id]):'<div class="mloading">상세 정보 없음</div>'); }
+    const cx=document.getElementById("mcross"); if(cx) cx.innerHTML=crossBasisHtml(d, caps.series);
+  });
+}
+/* 키워드 클릭 → 그 키워드 작품 전부 */
+function openKeywordList(kw){
+  const ids=(KWINDEX&&KWINDEX[kw])||[];
+  const items=ids.map(id=>({id, info:LOOKUP.id[id]})).filter(x=>x.info)
+    .sort((a,b)=>((DETAILS[b.id]||{}).fav||0)-((DETAILS[a.id]||{}).fav||0));
+  document.getElementById("modalBody").innerHTML=`
+    <div class="klhead"><span class="klt">#${esc(kw)}</span><span class="klc">${items.length}작품</span></div>
+    <div class="kllist">${items.map(x=>{
+      const det=DETAILS[x.id]||{};
+      return `<a class="klrow" href="https://comic.naver.com/webtoon/list?titleId=${x.id}" target="_blank" rel="noopener noreferrer">
+        <img class="klthumb" loading="lazy" src="${esc(x.info[1]||"")}" alt="">
+        <span class="klname">${esc(x.info[0])}<small>${esc(det.g||"")}${det.star?" · ★"+det.star:""}</small></span></a>`;
+    }).join("")}</div>`;
+  document.getElementById("modal").hidden=false;
 }
 function wireModal(){
   const modal=document.getElementById("modal"), close=()=>{ modal.hidden=true; };
   document.getElementById("modalBack").onclick=close;
   document.getElementById("modalX").onclick=close;
   document.addEventListener("keydown", e=>{ if(e.key==="Escape"&&!modal.hidden) close(); });
+  document.getElementById("modalBody").addEventListener("click", e=>{ const kb=e.target.closest("[data-kw]"); if(kb){ e.preventDefault(); openKeywordList(kb.dataset.kw); } });
   const board=document.getElementById("board");
   board.addEventListener("click", e=>{ const li=e.target.closest("[data-i]"); if(li) openModal(rowsCache[+li.dataset.i]); });
   board.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){ const li=e.target.closest("[data-i]"); if(li){ e.preventDefault(); openModal(rowsCache[+li.dataset.i]); } } });
+}
+/* 엑셀(CSV) 다운로드 — 현재 화면 + 기준별 순위 + 집계 */
+async function exportCSV(){
+  await ensureDetails();
+  const findRank=(rows,byId,d)=>{ if(!rows)return null; const row=byId?rows.find(r=>r.id===d.id):rows.find(r=>r.t===d.name); return row?row.r:null; };
+  const cross=d=>{
+    const E=[];
+    if(SOURCES[src].caps.series){ for(const [p,pl] of PERIODS){ const r=findRank(SERIES[variant]&&SERIES[variant][p],true,d); if(r)E.push((variant==="comic"?"웹툰":"웹소설")+pl+r); } }
+    else{
+      for(const c of ["전체","여성","남성"]){ const r=findRank(APP&&APP.charts[c],false,d); if(r)E.push("앱"+c+r); }
+      for(const [w,wl] of WEEKDAYS) for(const v of ["web","app"]){ const r=findRank(WEEKDAY[v]&&WEEKDAY[v][w],true,d); if(r)E.push("요일"+(v==="app"?"앱":"웹")+wl+r); }
+      for(const [g,gl] of GENRES) for(const v of ["web","app"]){ const r=findRank(GENRE[v]&&GENRE[v][g],true,d); if(r)E.push("장르"+(v==="app"?"앱":"웹")+gl+r); }
+    }
+    return E.join(" · ");
+  };
+  const q=s=>`"${String(s==null?"":s).replace(/"/g,'""')}"`;
+  const head=["순위","작품","작가","장르","제작사","평균별점","회차수","관심수","매일+","키워드","기준별순위(겹침)"];
+  const lines=[head.join(",")];
+  for(const d of rowsCache){
+    const det=(!SOURCES[src].caps.series && DETAILS[d.id])||{};
+    lines.push([d.r,q(d.name),q(d.a),q(det.g||""),q(det.cp||""),det.star||"",det.ep||"",det.fav||"",DAILYPLUS.has(d.id)?"Y":"",q((det.k||[]).join(" ")),q(cross(d))].join(","));
+  }
+  const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+  a.download=`웹툰랭킹_${src}${variant?"_"+variant:""}_${sub}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
 }
 function wireTheme(){
   document.getElementById("tbtn").addEventListener("click", ()=>{
@@ -236,5 +320,6 @@ function wireTheme(){
     document.documentElement.setAttribute("data-theme",next);
     try{ localStorage.setItem("wt-theme",next); }catch(e){}
   });
+  const dl=document.getElementById("dlbtn"); if(dl) dl.addEventListener("click", exportCSV);
 }
 boot();
