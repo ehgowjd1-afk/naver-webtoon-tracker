@@ -108,6 +108,29 @@ async function collectDetails(existing){
   return details;
 }
 
+/* 평균 댓글수: 각 작품 최근 5회차 댓글수(activePostCount) 평균 — wcc 배치 API. 매일 갱신 */
+async function collectComments(details){
+  const ids = Object.keys(details).filter(id => details[id].ep > 0).map(Number);
+  const B = 10; // 작품 10개 = pageId 50개/배치
+  let done = 0;
+  for(let i=0;i<ids.length;i+=B){
+    const batch = ids.slice(i,i+B);
+    const pageIds = [];
+    for(const id of batch){ const ep = details[id].ep; for(let no=Math.max(1,ep-4); no<=ep; no++) pageIds.push(`webtoon_${id}_${no}`); }
+    const qs = pageIds.map(p=>"pageIds="+p).join("&");
+    try{
+      const r = await fetch(`https://comic.naver.com/comment/api/community/v1/pages/activity/count/?${qs}`, { headers:{ "User-Agent":UA_PC, "Service-Ticket-Id":"comic_webtoon", "Referer":"https://comic.naver.com/" } });
+      const d = await r.json();
+      const byId = {};
+      for(const c of ((d.result&&d.result.countList)||[])){ const m = c.pageId.match(/webtoon_(\d+)_/); if(m){ (byId[m[1]]||(byId[m[1]]=[])).push(c.activePostCount||0); } }
+      for(const id of batch){ const arr = byId[id]||[]; details[id].cmt = arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0; }
+    }catch(e){ /* skip batch */ }
+    done += batch.length;
+    await sleep(120);
+  }
+  console.log("comments:", done, "작품 평균댓글 수집");
+}
+
 /* 순위 추이 누적: history.json = {dates:[...], series:{basisKey:{id:[rank aligned to dates]}}} (최근 45일) */
 function buildTodayBases(web_wd, app_wd, web_gn, app_gn, s_comic, s_novel){
   const b = {}, put = (key, arr) => { b[key] = Object.fromEntries((arr||[]).map(r => [r.id, r.r])); };
@@ -148,6 +171,7 @@ function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(
   try { existingDetails = JSON.parse(fs.readFileSync(path.join(OUT,"details.json"),"utf8")); } catch(e){}
   const details = await collectDetails(existingDetails);
   for(const id in stars){ if(details[id]) details[id].star = stars[id]; } // 평균별점 매일 갱신
+  await collectComments(details); // 평균댓글수 매일 갱신
 
   let hist = {};
   try { hist = JSON.parse(fs.readFileSync(path.join(OUT,"history.json"),"utf8")); } catch(e){}

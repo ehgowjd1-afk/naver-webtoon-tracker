@@ -198,6 +198,7 @@ function detailHtml(det){
   if(det.cp) info.push(["제작사", det.cp]);
   const publish=[det.day,det.age].filter(Boolean).join(" · "); if(publish) info.push(["연재", publish]);
   if(det.star) info.push(["평균 별점", "★ "+det.star]);
+  if(det.cmt) info.push(["평균 댓글", det.cmt.toLocaleString()+"개"]);
   if(det.ep) info.push(["회차", det.ep+"화"]);
   if(det.fav) info.push(["관심", det.fav.toLocaleString()+"명"]);
   let h="";
@@ -301,11 +302,11 @@ async function exportCSV(){
     return E.join(" · ");
   };
   const q=s=>`"${String(s==null?"":s).replace(/"/g,'""')}"`;
-  const head=["순위","작품","작가","장르","제작사","평균별점","회차수","관심수","매일+","키워드","기준별순위(겹침)"];
+  const head=["순위","작품","작가","장르","제작사","평균별점","평균댓글","회차수","관심수","매일+","키워드","기준별순위(겹침)"];
   const lines=[head.join(",")];
   for(const d of rowsCache){
     const det=(!SOURCES[src].caps.series && DETAILS[d.id])||{};
-    lines.push([d.r,q(d.name),q(d.a),q(det.g||""),q(det.cp||""),det.star||"",det.ep||"",det.fav||"",DAILYPLUS.has(d.id)?"Y":"",q((det.k||[]).join(" ")),q(cross(d))].join(","));
+    lines.push([d.r,q(d.name),q(d.a),q(det.g||""),q(det.cp||""),det.star||"",det.cmt||"",det.ep||"",det.fav||"",DAILYPLUS.has(d.id)?"Y":"",q((det.k||[]).join(" ")),q(cross(d))].join(","));
   }
   const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
