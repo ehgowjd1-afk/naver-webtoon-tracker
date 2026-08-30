@@ -195,7 +195,7 @@ function buildKwIndex(){ KWINDEX={}; for(const id in DETAILS){ for(const kw of (
 function detailHtml(det){
   const info=[];
   if(det.g) info.push(["장르", det.g + (det.dailyplus?" · 매일+":"")]);
-  if(det.cp) info.push(["제작사", det.cp]);
+  if(det.cp) info.push(["제작사", det.cp==="다중"?"여러 제작사":det.cp]);
   if(det.launch) info.push(["런칭일", det.launch]);
   const publish=[det.day,det.age].filter(Boolean).join(" · "); if(publish) info.push(["연재", publish]);
   if(det.star) info.push(["평균 별점", "★ "+det.star]);
@@ -256,6 +256,7 @@ function openModal(d){
     </div>
     <div class="mdetail" id="mdetail">${webtoon?'<div class="mloading">상세 불러오는 중…</div>':""}</div>
     <div id="mcross"></div>
+    <button class="mepbtn" data-trend="1" data-id="${d.id}" data-name="${esc(d.name)}">⬇ 순위 추이 엑셀 (기준별 시트)</button>
     ${webtoon?`<button class="mepbtn" data-id="${d.id}" data-name="${esc(d.name)}">⬇ 회차별 댓글·별점 엑셀(CSV)</button>`:""}
     <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
   document.getElementById("modal").hidden=false;
@@ -286,7 +287,8 @@ function wireModal(){
   document.addEventListener("keydown", e=>{ if(e.key==="Escape"&&!modal.hidden) close(); });
   document.getElementById("modalBody").addEventListener("click", e=>{
     const kb=e.target.closest("[data-kw]"); if(kb){ e.preventDefault(); openKeywordList(kb.dataset.kw); return; }
-    const ep=e.target.closest(".mepbtn"); if(ep){ exportEpisodeCSV(+ep.dataset.id, ep.dataset.name); }
+    const tb=e.target.closest("[data-trend]"); if(tb){ exportTrendXLSX(+tb.dataset.id, tb.dataset.name); return; }
+    const ep=e.target.closest(".mepbtn"); if(ep && ep.dataset.id){ exportEpisodeCSV(+ep.dataset.id, ep.dataset.name); }
   });
   const board=document.getElementById("board");
   board.addEventListener("click", e=>{ const li=e.target.closest("[data-i]"); if(li) openModal(rowsCache[+li.dataset.i]); });
@@ -330,7 +332,7 @@ async function exportCSV(){
   const lines=[head.join(",")];
   for(const d of rowsCache){
     const det=(!SOURCES[src].caps.series && DETAILS[d.id])||{};
-    lines.push([d.r,q(d.name),q(d.a),q(det.g||""),q(det.cp||""),q(det.launch||""),det.star||"",det.cmt||"",det.ep||"",det.fav||"",DAILYPLUS.has(d.id)?"Y":"",q((det.k||[]).join(" ")),q(cross(d)), ...trend.rankFn(d)].join(","));
+    lines.push([d.r,q(d.name),q(d.a),q(det.g||""),q(det.cp==="다중"?"여러 제작사":(det.cp||"")),q(det.launch||""),det.star||"",det.cmt||"",det.ep||"",det.fav||"",DAILYPLUS.has(d.id)?"Y":"",q((det.k||[]).join(" ")),q(cross(d)), ...trend.rankFn(d)].join(","));
   }
   const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
@@ -349,6 +351,37 @@ async function exportEpisodeCSV(id, name){
   const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`${name}_회차별.csv`;
   document.body.appendChild(a); a.click(); a.remove();
+}
+/* basisKey → 사람이 읽는 라벨 */
+const WDMAP=Object.fromEntries(WEEKDAYS), GNMAP=Object.fromEntries(GENRES), PMAP=Object.fromEntries(PERIODS);
+function basisLabel(key){
+  if(key.startsWith("app_")) return "앱주간 "+key.slice(4);
+  if(key.startsWith("wd_web_")) return "요일 웹 "+(WDMAP[key.slice(7)]||key.slice(7));
+  if(key.startsWith("wd_app_")) return "요일 앱 "+(WDMAP[key.slice(7)]||key.slice(7));
+  if(key.startsWith("gn_web_")) return "장르 웹 "+(GNMAP[key.slice(7)]||key.slice(7));
+  if(key.startsWith("gn_app_")) return "장르 앱 "+(GNMAP[key.slice(7)]||key.slice(7));
+  if(key.startsWith("series_comic_")) return "시리즈 웹툰 "+(PMAP[key.slice(13)]||key.slice(13));
+  if(key.startsWith("series_novel_")) return "시리즈 웹소설 "+(PMAP[key.slice(13)]||key.slice(13));
+  return key;
+}
+/* 작품별 순위 추이 — 기준(basis)별 시트로 나눈 xlsx */
+async function exportTrendXLSX(id, name){
+  if(!window.MiniXlsx){ alert("엑셀 모듈 로딩 실패 — 새로고침 후 다시 시도해주세요."); return; }
+  await ensureHistory();
+  const dates=(HISTORY&&HISTORY.dates)||[], sheets=[];
+  for(const [key,S] of Object.entries((HISTORY&&HISTORY.series)||{})){
+    if(S[id]) sheets.push({ name:basisLabel(key), rows:[["날짜","순위"], ...dates.map((d,i)=>[d, S[id][i]==null?"":S[id][i]])] });
+  }
+  if(!SOURCES[src].caps.series){
+    const wc={};
+    for(const w of WEEKS){ try{ wc[w]=(await fetchJSON(`data/${w}.json`)).charts; }catch(e){ wc[w]={}; } }
+    for(const c of ["전체","여성","남성"]){
+      const rows=WEEKS.map(w=>{ const r=((wc[w]&&wc[w][c])||[]).find(x=>x.t===name); return [w, r?r.r:""]; });
+      if(rows.some(r=>r[1]!=="")) sheets.push({ name:"앱주간 "+c, rows:[["주차","순위"], ...rows] });
+    }
+  }
+  if(!sheets.length){ alert("아직 이 작품의 순위 추이 데이터가 없어요.\n(요일별·장르·시리즈는 매일, 앱주간은 매주 쌓입니다)"); return; }
+  MiniXlsx.downloadMulti(sheets, name+"_순위추이");
 }
 function wireTheme(){
   document.getElementById("tbtn").addEventListener("click", ()=>{

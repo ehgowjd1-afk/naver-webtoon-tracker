@@ -92,7 +92,7 @@ async function collectDetails(existing){
         details[id] = {
           g: (tags.find(t=>/GENRE/.test(t.curationType))||{}).tagName || "",
           k: tags.filter(t=>t.curationType==="CUSTOM_TAG").map(t=>t.tagName),
-          cp: cpName.includes("_") ? cpName.split("_")[0] : cpName,
+          cp: (function(){ const p = cpName.includes("_") ? cpName.split("_")[0] : cpName; return p==="다중" ? "여러 제작사" : p; })(),
           age: (d.age&&d.age.description) || "",
           day: d.publishDescription || "",
           fav: d.favoriteCount || 0,
