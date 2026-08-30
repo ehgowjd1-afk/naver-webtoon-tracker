@@ -196,6 +196,7 @@ function detailHtml(det){
   const info=[];
   if(det.g) info.push(["장르", det.g + (det.dailyplus?" · 매일+":"")]);
   if(det.cp) info.push(["제작사", det.cp]);
+  if(det.launch) info.push(["런칭일", det.launch]);
   const publish=[det.day,det.age].filter(Boolean).join(" · "); if(publish) info.push(["연재", publish]);
   if(det.star) info.push(["평균 별점", "★ "+det.star]);
   if(det.cmt) info.push(["평균 댓글", det.cmt.toLocaleString()+"개"]);
@@ -291,7 +292,25 @@ function wireModal(){
   board.addEventListener("click", e=>{ const li=e.target.closest("[data-i]"); if(li) openModal(rowsCache[+li.dataset.i]); });
   board.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){ const li=e.target.closest("[data-i]"); if(li){ e.preventDefault(); openModal(rowsCache[+li.dataset.i]); } } });
 }
-/* 엑셀(CSV) 다운로드 — 현재 화면 + 기준별 순위 + 집계 */
+/* 현재 화면의 basisKey */
+function currentBasisKey(){
+  if(src==="app") return "app_"+sub;
+  if(src==="weekday") return "wd_"+variant+"_"+sub;
+  if(src==="genre") return "gn_"+variant+"_"+sub;
+  if(src==="series") return "series_"+variant+"_"+sub;
+}
+/* 날짜별 순위 추이 데이터: {dates:[], rankFn:(row)=>[각 날짜 순위]} */
+async function trendData(){
+  if(src==="app"){
+    const charts={};
+    for(const w of WEEKS){ try{ const d=await fetchJSON(`data/${w}.json`); charts[w]=(d.charts&&d.charts[sub])||[]; }catch(e){ charts[w]=[]; } }
+    return { dates:WEEKS.slice(), rankFn:(row)=>WEEKS.map(w=>{ const r=(charts[w]||[]).find(x=>x.t===row.name); return r?r.r:""; }) };
+  }
+  await ensureHistory();
+  const key=currentBasisKey(), dates=(HISTORY&&HISTORY.dates)||[], S=(HISTORY&&HISTORY.series[key])||{};
+  return { dates, rankFn:(row)=>{ const a=S[row.id]||[]; return dates.map((_,i)=> a[i]==null?"":a[i]); } };
+}
+/* 엑셀(CSV) 다운로드 — 현재 화면 + 기준별 순위 + 집계 + 날짜별 순위추이 */
 async function exportCSV(){
   await ensureDetails();
   const findRank=(rows,byId,d)=>{ if(!rows)return null; const row=byId?rows.find(r=>r.id===d.id):rows.find(r=>r.t===d.name); return row?row.r:null; };
@@ -305,12 +324,13 @@ async function exportCSV(){
     }
     return E.join(" · ");
   };
+  const trend=await trendData();
   const q=s=>`"${String(s==null?"":s).replace(/"/g,'""')}"`;
-  const head=["순위","작품","작가","장르","제작사","평균별점","평균댓글","회차수","관심수","매일+","키워드","기준별순위(겹침)"];
+  const head=["순위","작품","작가","장르","제작사","런칭일","평균별점","평균댓글","회차수","관심수","매일+","키워드","기준별순위(겹침)", ...trend.dates.map(d=>d+" 순위")];
   const lines=[head.join(",")];
   for(const d of rowsCache){
     const det=(!SOURCES[src].caps.series && DETAILS[d.id])||{};
-    lines.push([d.r,q(d.name),q(d.a),q(det.g||""),q(det.cp||""),det.star||"",det.cmt||"",det.ep||"",det.fav||"",DAILYPLUS.has(d.id)?"Y":"",q((det.k||[]).join(" ")),q(cross(d))].join(","));
+    lines.push([d.r,q(d.name),q(d.a),q(det.g||""),q(det.cp||""),q(det.launch||""),det.star||"",det.cmt||"",det.ep||"",det.fav||"",DAILYPLUS.has(d.id)?"Y":"",q((det.k||[]).join(" ")),q(cross(d)), ...trend.rankFn(d)].join(","));
   }
   const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob);

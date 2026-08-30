@@ -78,7 +78,7 @@ async function series(kind){ // kind: comic | novel
 async function collectDetails(existing){
   const details = existing || {};
   const ids = Object.keys(idL).map(Number);
-  const todo = ids.filter(id => !details[id] || details[id].ep === undefined); // 신규 or 스키마 미충족
+  const todo = ids.filter(id => !details[id] || details[id].ep === undefined || details[id].launch === undefined); // 신규 or 스키마 미충족
   console.log("details:", todo.length, "신규 / ", ids.length, "전체");
   const CONC = 4;
   for(let i=0;i<todo.length;i+=CONC){
@@ -87,8 +87,8 @@ async function collectDetails(existing){
         const d = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`);
         const tags = d.curationTagList || [];
         const cpName = (d.gfpAdCustomParam||{}).cpName || "";
-        let ep = 0;
-        try { const al = await getJSON(`https://comic.naver.com/api/article/list?titleId=${id}&page=1`, `https://comic.naver.com/webtoon/list?titleId=${id}`); ep = al.totalCount || 0; } catch(e){}
+        let ep = 0, launch = "";
+        try { const al = await getJSON(`https://comic.naver.com/api/article/list?titleId=${id}&page=1&sort=ASC`, `https://comic.naver.com/webtoon/list?titleId=${id}`); ep = al.totalCount || 0; const first = (al.articleList||[])[0]; launch = first ? (first.serviceDateDescription||"") : ""; } catch(e){}
         details[id] = {
           g: (tags.find(t=>/GENRE/.test(t.curationType))||{}).tagName || "",
           k: tags.filter(t=>t.curationType==="CUSTOM_TAG").map(t=>t.tagName),
@@ -96,7 +96,7 @@ async function collectDetails(existing){
           age: (d.age&&d.age.description) || "",
           day: d.publishDescription || "",
           fav: d.favoriteCount || 0,
-          ep,
+          ep, launch,
           dailyplus: ((d.gfpAdCustomParam||{}).dailyPlusYn === "Y"),
           syn: (d.synopsis||"").replace(/\s+/g," ").trim().slice(0,220),
           novel: tags.some(t=>t.curationType==="NOVEL_ORIGIN")
