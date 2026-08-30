@@ -3,7 +3,7 @@ name: collect
 # 앱 「이번 주 웹툰 랭킹」(전체/여성/남성)은 앱 전용이라 여기서 수집 불가 → 수동 커밋.
 on:
   schedule:
-    - cron: "0 0 * * *"   # 00:00 UTC = 09:00 KST
+    - cron: "15 0 * * *"   # 00:15 UTC = 09:15 KST
   workflow_dispatch:
 
 permissions:
