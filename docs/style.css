@@ -183,3 +183,5 @@ footer a:hover{text-decoration:underline}
   .thumb{width:42px; height:42px}
   .tile .big{font-size:19px}
 }
+.mepbtn{display:block; width:100%; margin-top:12px; background:var(--surface-2); color:var(--ink); border:1px solid var(--border); font-weight:600; font-size:13.5px; padding:10px; border-radius:11px; cursor:pointer; font-family:inherit}
+.mepbtn:hover{border-color:var(--accent); color:var(--accent)}

@@ -255,6 +255,7 @@ function openModal(d){
     </div>
     <div class="mdetail" id="mdetail">${webtoon?'<div class="mloading">상세 불러오는 중…</div>':""}</div>
     <div id="mcross"></div>
+    ${webtoon?`<button class="mepbtn" data-id="${d.id}" data-name="${esc(d.name)}">⬇ 회차별 댓글·별점 엑셀(CSV)</button>`:""}
     <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
   document.getElementById("modal").hidden=false;
   Promise.all([webtoon?ensureDetails():Promise.resolve(), ensureHistory()]).then(()=>{
@@ -282,7 +283,10 @@ function wireModal(){
   document.getElementById("modalBack").onclick=close;
   document.getElementById("modalX").onclick=close;
   document.addEventListener("keydown", e=>{ if(e.key==="Escape"&&!modal.hidden) close(); });
-  document.getElementById("modalBody").addEventListener("click", e=>{ const kb=e.target.closest("[data-kw]"); if(kb){ e.preventDefault(); openKeywordList(kb.dataset.kw); } });
+  document.getElementById("modalBody").addEventListener("click", e=>{
+    const kb=e.target.closest("[data-kw]"); if(kb){ e.preventDefault(); openKeywordList(kb.dataset.kw); return; }
+    const ep=e.target.closest(".mepbtn"); if(ep){ exportEpisodeCSV(+ep.dataset.id, ep.dataset.name); }
+  });
   const board=document.getElementById("board");
   board.addEventListener("click", e=>{ const li=e.target.closest("[data-i]"); if(li) openModal(rowsCache[+li.dataset.i]); });
   board.addEventListener("keydown", e=>{ if(e.key==="Enter"||e.key===" "){ const li=e.target.closest("[data-i]"); if(li){ e.preventDefault(); openModal(rowsCache[+li.dataset.i]); } } });
@@ -311,6 +315,19 @@ async function exportCSV(){
   const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
   const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
   a.download=`웹툰랭킹_${src}${variant?"_"+variant:""}_${sub}.csv`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+/* 작품별 회차 댓글·별점 CSV */
+async function exportEpisodeCSV(id, name){
+  let data;
+  try{ data = await fetchJSON(`data/episodes/${id}.json`); }
+  catch(e){ alert("이 작품의 회차별 데이터는 아직 수집 전이에요.\n전체 작품 백필이 진행 중이라 며칠에 걸쳐 채워집니다."); return; }
+  const q=s=>`"${String(s==null?"":s).replace(/"/g,'""')}"`;
+  const head=["회차번호","회차","날짜","별점","댓글수","유료"];
+  const lines=[head.join(",")];
+  for(const e of (data.eps||[])) lines.push([e.no,q(e.sub),q(e.date||""),e.star||"",e.cmt!=null?e.cmt:"",e.charge?"Y":""].join(","));
+  const blob=new Blob(["﻿"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"});
+  const a=document.createElement("a"); a.href=URL.createObjectURL(blob); a.download=`${name}_회차별.csv`;
   document.body.appendChild(a); a.click(); a.remove();
 }
 function wireTheme(){

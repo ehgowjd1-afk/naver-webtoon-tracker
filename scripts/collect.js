@@ -131,6 +131,45 @@ async function collectComments(details){
   console.log("comments:", done, "작품 평균댓글 수집");
 }
 
+/* 회차별 댓글수·별점 전수 수집(백필): 하루 N작품씩 회전. article/list(별점·날짜) + wcc(댓글수).
+   episodes/{titleId}.json = {id,name,updated,eps:[{no,sub,star,cmt,date,charge}]} (최근 최대 600화) */
+async function collectEpisodes(details, updated){
+  const EP_TITLES_PER_RUN = 120, EP_MAXPAGES = 30; // 최근 600화
+  const EPDIR = path.join(OUT, "episodes");
+  fs.mkdirSync(EPDIR, { recursive:true });
+  let idx = {}; try { idx = JSON.parse(fs.readFileSync(path.join(OUT,"episodes_index.json"),"utf8")); } catch(e){}
+  const ids = Object.keys(details).filter(id => details[id].ep > 0).map(Number);
+  ids.sort((a,b) => ((idx[a]&&idx[a].u)||0) - ((idx[b]&&idx[b].u)||0)); // 안 된/오래된 것 먼저
+  const todo = ids.slice(0, EP_TITLES_PER_RUN);
+  for(const id of todo){
+    try{
+      const pages = Math.min(Math.ceil(details[id].ep/20), EP_MAXPAGES);
+      const eps = [];
+      for(let p=1; p<=pages; p++){
+        const al = await getJSON(`https://comic.naver.com/api/article/list?titleId=${id}&page=${p}&sort=DESC`, `https://comic.naver.com/webtoon/list?titleId=${id}`);
+        for(const a of (al.articleList||[])) eps.push({ no:a.no, sub:a.subtitle||"", star:Math.round((a.starScore||0)*100)/100, date:a.serviceDateDescription||"", charge:!!a.charge });
+        await sleep(70);
+      }
+      const nos = eps.map(e=>e.no);
+      for(let i=0; i<nos.length; i+=50){
+        const qs = nos.slice(i,i+50).map(no=>"pageIds=webtoon_"+id+"_"+no).join("&");
+        try{
+          const r = await fetch(`https://comic.naver.com/comment/api/community/v1/pages/activity/count/?${qs}`, { headers:{ "User-Agent":UA_PC, "Service-Ticket-Id":"comic_webtoon", "Referer":"https://comic.naver.com/" } });
+          const d = await r.json();
+          const cm = {}; for(const c of ((d.result&&d.result.countList)||[])){ const m = c.pageId.match(/_(\d+)$/); if(m) cm[+m[1]] = c.activePostCount||0; }
+          for(const e of eps){ if(e.no in cm) e.cmt = cm[e.no]; }
+        }catch(e){}
+        await sleep(90);
+      }
+      eps.sort((a,b)=>a.no-b.no);
+      fs.writeFileSync(path.join(EPDIR, id+".json"), JSON.stringify({ id, name:(idL[id]&&idL[id][0])||"", updated, eps }));
+      idx[id] = { u: Date.now(), n: eps.length };
+    }catch(e){ console.error("episodes", id, e.message); }
+  }
+  fs.writeFileSync(path.join(OUT,"episodes_index.json"), JSON.stringify(idx));
+  console.log("episodes:", todo.length, "작품 처리 · 누적", Object.keys(idx).length, "/", ids.length);
+}
+
 /* 순위 추이 누적: history.json = {dates:[...], series:{basisKey:{id:[rank aligned to dates]}}} (최근 45일) */
 function buildTodayBases(web_wd, app_wd, web_gn, app_gn, s_comic, s_novel){
   const b = {}, put = (key, arr) => { b[key] = Object.fromEntries((arr||[]).map(r => [r.id, r.r])); };
@@ -183,6 +222,8 @@ function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
   fs.writeFileSync(path.join(OUT,"details.json"), JSON.stringify(details));
   fs.writeFileSync(path.join(OUT,"history.json"), JSON.stringify(hist));
+
+  try { await collectEpisodes(details, updated); } catch(e){ console.error("episodes failed:", e.message); } // best-effort 백필
 
   const c=o=>Object.fromEntries(Object.entries(o).map(([k,v])=>[k,v.length]));
   console.log("done:", JSON.stringify({ web_wd:c(web_wd), app_wd:c(app_wd), comic:c(s_comic), novel:c(s_novel), details:Object.keys(details).length, histDates:hist.dates.length, histBases:Object.keys(hist.series).length }));
