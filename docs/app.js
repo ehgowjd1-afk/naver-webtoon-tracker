@@ -184,10 +184,26 @@ function urlFor(d){
   if(SOURCES[src].caps.series) return d.id?`https://series.naver.com/${variant}/detail.series?productNo=${d.id}`:searchUrl(d.name);
   return d.id?`https://comic.naver.com/webtoon/list?titleId=${d.id}`:searchUrl(d.name);
 }
+let DETAILS=null, detailsLoading=null;
+function ensureDetails(){ if(DETAILS) return Promise.resolve(DETAILS); if(!detailsLoading) detailsLoading=fetchJSON("data/details.json").then(d=>DETAILS=d).catch(()=>DETAILS={}); return detailsLoading; }
+function detailHtml(det){
+  const info=[];
+  if(det.g) info.push(["장르", det.g]);
+  if(det.cp) info.push(["제작사", det.cp]);
+  const publish=[det.day,det.age].filter(Boolean).join(" · "); if(publish) info.push(["연재", publish]);
+  if(det.fav) info.push(["관심", det.fav.toLocaleString()+"명"]);
+  let h="";
+  if(info.length) h+=`<div class="mrows">`+info.map(([k,v])=>`<div class="mrow"><span class="mk">${k}</span><span class="mv">${esc(v)}</span></div>`).join("")+`</div>`;
+  const kws=(det.k||[]).slice(); if(det.novel) kws.push("소설원작");
+  if(kws.length) h+=`<div class="mkw">`+kws.map(t=>`<span class="kw">#${esc(t)}</span>`).join("")+`</div>`;
+  if(det.syn) h+=`<p class="msyn">${esc(det.syn)}</p>`;
+  return h;
+}
 function openModal(d){
   const url=urlFor(d), caps=SOURCES[src].caps;
   const badges=badgeHtml(d)+(caps.move?`<span class="badge ${d.m>0?"b-new":d.m<0?"b-rest":"b-fin"}">${d.m>0?"▲"+d.m:d.m<0?"▼"+Math.abs(d.m):"변동없음"}</span>`:"");
   const ctx=`${esc(SOURCES[src].label)}${variant?" · "+esc(varLabel()):""} · ${esc(subLabel(sub))} · <b>${d.r}위</b>`;
+  const webtoon = !caps.series && d.id!=null;
   document.getElementById("modalBody").innerHTML=`
     <div class="mtop">
       ${d.th?`<img class="mthumb" src="${esc(d.th)}" alt="">`:`<div class="mthumb"></div>`}
@@ -198,8 +214,10 @@ function openModal(d){
         <div class="mbadges">${badges}</div>
       </div>
     </div>
+    <div class="mdetail" id="mdetail">${webtoon?'<div class="mloading">상세 불러오는 중…</div>':""}</div>
     <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
   document.getElementById("modal").hidden=false;
+  if(webtoon) ensureDetails().then(D=>{ const el=document.getElementById("mdetail"); if(el) el.innerHTML = D[d.id]?detailHtml(D[d.id]):'<div class="mloading">상세 정보 없음</div>'; });
 }
 function wireModal(){
   const modal=document.getElementById("modal"), close=()=>{ modal.hidden=true; };

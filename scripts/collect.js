@@ -72,6 +72,36 @@ async function series(kind){ // kind: comic | novel
   return o;
 }
 
+/* 작품 상세(장르·키워드·제작사·관심수·연령·요일·줄거리) — 신규 titleId만 증분 수집 */
+async function collectDetails(existing){
+  const details = existing || {};
+  const ids = Object.keys(idL).map(Number);
+  const todo = ids.filter(id => !details[id]);
+  console.log("details:", todo.length, "신규 / ", ids.length, "전체");
+  const CONC = 4;
+  for(let i=0;i<todo.length;i+=CONC){
+    await Promise.all(todo.slice(i,i+CONC).map(async id=>{
+      try{
+        const d = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`);
+        const tags = d.curationTagList || [];
+        const cpName = (d.gfpAdCustomParam||{}).cpName || "";
+        details[id] = {
+          g: (tags.find(t=>/GENRE/.test(t.curationType))||{}).tagName || "",
+          k: tags.filter(t=>t.curationType==="CUSTOM_TAG").map(t=>t.tagName),
+          cp: cpName.includes("_") ? cpName.split("_")[0] : cpName,
+          age: (d.age&&d.age.description) || "",
+          day: d.publishDescription || "",
+          fav: d.favoriteCount || 0,
+          syn: (d.synopsis||"").replace(/\s+/g," ").trim().slice(0,220),
+          novel: tags.some(t=>t.curationType==="NOVEL_ORIGIN")
+        };
+      }catch(e){ /* skip */ }
+    }));
+    await sleep(50);
+  }
+  return details;
+}
+
 function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(0,10); }
 
 (async ()=>{
@@ -82,11 +112,16 @@ function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(
   const web_gn = await webGenre();
   const [app_wd, app_gn, s_comic, s_novel] = await Promise.all([appWeekday(), appGenre(), series("comic"), series("novel")]);
 
+  let existingDetails = {};
+  try { existingDetails = JSON.parse(fs.readFileSync(path.join(OUT,"details.json"),"utf8")); } catch(e){}
+  const details = await collectDetails(existingDetails);
+
   fs.writeFileSync(path.join(OUT,"weekday.json"), JSON.stringify({ updated, date, web:web_wd, app:app_wd }));
   fs.writeFileSync(path.join(OUT,"genre.json"), JSON.stringify({ updated, date, web:web_gn, app:app_gn }));
   fs.writeFileSync(path.join(OUT,"series.json"), JSON.stringify({ updated, date, comic:s_comic, novel:s_novel }));
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
+  fs.writeFileSync(path.join(OUT,"details.json"), JSON.stringify(details));
 
   const c=o=>Object.fromEntries(Object.entries(o).map(([k,v])=>[k,v.length]));
-  console.log("done:", JSON.stringify({ web_wd:c(web_wd), app_wd:c(app_wd), web_gn:c(web_gn), app_gn:c(app_gn), comic:c(s_comic), novel:c(s_novel), lookup:Object.keys(idL).length }));
+  console.log("done:", JSON.stringify({ web_wd:c(web_wd), app_wd:c(app_wd), web_gn:c(web_gn), app_gn:c(app_gn), comic:c(s_comic), novel:c(s_novel), lookup:Object.keys(idL).length, details:Object.keys(details).length }));
 })().catch(e=>{ console.error("FAILED:",e); process.exit(1); });
