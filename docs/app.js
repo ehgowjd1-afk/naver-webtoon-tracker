@@ -68,7 +68,7 @@ function selectSrc(k){
   } else { vn.hidden=true; vn.innerHTML=""; }
   const subs=SOURCES[k].subs(); sub=subs[0][0];
   const sn=document.getElementById("subnav");
-  sn.innerHTML=subs.map(([code,lab],i)=>`<button class="sub" role="tab" data-sub="${code}" aria-selected="${i===0}">${lab}${k==="app"?`<small>${subs[i][1]}</small>`:""}</button>`).join("");
+  sn.innerHTML=subs.map(([code,lab],i)=>`<button class="sub" role="tab" data-sub="${code}" aria-selected="${i===0}">${k==="app"?code:lab}${k==="app"?`<small>${lab}</small>`:""}</button>`).join("");
   sn.onclick=e=>{ const b=e.target.closest("[data-sub]"); if(!b)return; sub=b.dataset.sub; [...sn.children].forEach(c=>c.setAttribute("aria-selected",c===b)); renderView(); };
   document.getElementById("q").value="";
   renderView();
