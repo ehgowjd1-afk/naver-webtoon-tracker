@@ -18,13 +18,13 @@ const S_MOVE=[["rank","순위순"],["up","상승폭"],["down","하락폭"]];
 const dot = d => (d||"").replace(/-/g,".");
 
 const SOURCES = {
-  app:     { label:"앱 주간", variants:null, subs:()=>[["전체","100"],["여성","50"],["남성","50"]], data:(v,s)=>APP&&APP.charts[s], caps:{move:1,streak:1,badge:1,tiles:1,gap:1}, filters:F_APP, sorts:S_MOVE, note:()=>`${dot(APP.date)} · 앱 「이번 주 웹툰 랭킹」` },
+  app:     { label:"앱 주간", variants:null, subs:()=>["전체","여성","남성"].map(k=>[k,String((APP&&APP.charts&&APP.charts[k]||[]).length)]), data:(v,s)=>APP&&APP.charts[s], caps:{move:1,streak:1,badge:1,tiles:1,gap:1}, filters:F_APP, sorts:S_MOVE, note:()=>`${dot(APP.date)} · 앱 「이번 주 웹툰 랭킹」` },
   weekday: { label:"요일별", variants:[["app","앱"],["web","웹"]], subs:()=>WEEKDAYS, data:(v,s)=>WEEKDAY&&WEEKDAY[v]&&WEEKDAY[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(WEEKDAY.date)} · 요일별 인기순 · ${v==="app"?"앱(모바일)":"웹(PC)"} · 자동` },
   genre:   { label:"장르", variants:[["app","앱"],["web","웹"]], subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE[v]&&GENRE[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(GENRE.date)} · 장르별 인기순 · ${v==="app"?"앱(모바일)":"웹(PC)"} · 자동` },
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][s], caps:{move:1,tiles:1,series:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 네이버 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 자동` },
 };
 const SRC_ORDER=["app","weekday","genre","series"];
-const subLabel = s => (SOURCES[src].subs().find(x=>x[0]===s)||[s,s])[1];
+const subLabel = s => src==="app" ? s : (SOURCES[src].subs().find(x=>x[0]===s)||[s,s])[1];
 const varLabel = () => { const vs=SOURCES[src].variants; return vs?(vs.find(x=>x[0]===variant)||["",""])[1]:""; };
 
 async function fetchJSON(p){ const r=await fetch(p,{cache:"no-cache"}); if(!r.ok) throw new Error(p+" "+r.status); return r.json(); }
