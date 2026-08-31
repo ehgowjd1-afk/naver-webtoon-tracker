@@ -23,9 +23,12 @@ const SOURCES = {
   genre:   { label:"장르", variants:[["app","앱"],["web","웹"]], subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE[v]&&GENRE[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(GENRE.date)} · 장르별 인기순 · ${v==="app"?"앱(모바일)":"웹(PC)"} · 자동` },
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][s], caps:{move:1,tiles:1,series:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 네이버 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 자동` },
 };
-const SRC_ORDER=["app","weekday","genre","series"];
+const GROUPS=[["naver","네이버웹툰",["app","weekday","genre"]],["series","시리즈",["series"]]];
+let group="naver";
 const subLabel = s => src==="app" ? s : (SOURCES[src].subs().find(x=>x[0]===s)||[s,s])[1];
 const varLabel = () => { const vs=SOURCES[src].variants; return vs?(vs.find(x=>x[0]===variant)||["",""])[1]:""; };
+function weekLabel(w){ const p=(w||"").split("-").map(Number); return p.length<3?dot(w):`${p[1]}월 ${Math.ceil(p[2]/7)}째주`; }
+function weekLabels(weeks){ const info=weeks.map(w=>{const p=w.split("-").map(Number);return {w,m:p[1],d:p[2],lab:weekLabel(w)};}); const cnt={}; info.forEach(x=>cnt[x.lab]=(cnt[x.lab]||0)+1); const map={}; info.forEach(x=>map[x.w]=cnt[x.lab]>1?`${x.lab} (${x.m}/${x.d})`:x.lab); return map; }
 
 async function fetchJSON(p){ const r=await fetch(p,{cache:"no-cache"}); if(!r.ok) throw new Error(p+" "+r.status); return r.json(); }
 
@@ -43,24 +46,34 @@ async function boot(){
   LOOKUP=R[4].status==="fulfilled"?R[4].value:{id:{},name:{}};
   try{ for(const v of ["web","app"]) (WEEKDAY[v]&&WEEKDAY[v].dailyPlus||[]).forEach(r=>DAILYPLUS.add(r.id)); }catch(e){}
 
-  const wsel=document.getElementById("wsel");
-  wsel.innerHTML=WEEKS.slice().reverse().map(w=>`<option value="${w}">${dot(w)}</option>`).join("");
+  const wsel=document.getElementById("wsel"), wl=weekLabels(WEEKS);
+  wsel.innerHTML=WEEKS.slice().reverse().map(w=>`<option value="${w}">${esc(wl[w])}</option>`).join("");
   wsel.value=idx.latest;
-  wsel.addEventListener("change", async ()=>{ try{ APP=await fetchJSON(`data/${wsel.value}.json`); if(src==="app") renderView(); }catch(e){} });
-  if(WEEKS.length<2) wsel.style.display="none";
+  wsel.addEventListener("change", async ()=>{ try{ APP=await fetchJSON(`data/${wsel.value}.json`); if(src==="app"){ renderSubnav(); renderView(); } }catch(e){} });
 
-  renderSrcNav(); selectSrc("app");
+  renderGroupNav();
+  document.getElementById("groupnav").addEventListener("click", e=>{ const b=e.target.closest("[data-grp]"); if(b) selectGroup(b.dataset.grp); });
+  document.getElementById("srcnav").addEventListener("click", e=>{ const b=e.target.closest("[data-src]"); if(b) selectSrc(b.dataset.src); });
+  selectGroup("naver");
 }
 function fail(){ document.getElementById("board").innerHTML=`<li class="empty">데이터를 불러오지 못했어요. 새로고침 해주세요.</li>`; }
 
-function renderSrcNav(){
-  const el=document.getElementById("srcnav");
-  el.innerHTML=SRC_ORDER.map(k=>`<button class="src" role="tab" data-src="${k}" aria-selected="${k===src}">${SOURCES[k].label}</button>`).join("");
-  el.addEventListener("click", e=>{ const b=e.target.closest("[data-src]"); if(b) selectSrc(b.dataset.src); });
+function renderGroupNav(){
+  document.getElementById("groupnav").innerHTML=GROUPS.map(([k,lab])=>`<button class="grp" role="tab" data-grp="${k}" aria-selected="${k===group}">${lab}</button>`).join("");
+}
+function selectGroup(g){
+  group=g;
+  document.querySelectorAll("#groupnav .grp").forEach(b=>b.setAttribute("aria-selected", b.dataset.grp===g));
+  const srcs=(GROUPS.find(x=>x[0]===g)||GROUPS[0])[2];
+  const srcrow=document.getElementById("srcrow"), sn=document.getElementById("srcnav");
+  if(srcs.length>1){ srcrow.hidden=false; sn.innerHTML=srcs.map(k=>`<button class="src" role="tab" data-src="${k}" aria-selected="false">${SOURCES[k].label}</button>`).join(""); }
+  else { srcrow.hidden=true; sn.innerHTML=""; }
+  selectSrc(srcs[0]);
 }
 function selectSrc(k){
   src=k; fMode="all"; sMode="rank"; query="";
   document.querySelectorAll("#srcnav .src").forEach(b=>b.setAttribute("aria-selected", b.dataset.src===k));
+  document.getElementById("wsel").style.display=(k==="app"&&WEEKS.length>1)?"":"none";
   const vs=SOURCES[k].variants; variant = vs?vs[0][0]:null;
   const vn=document.getElementById("varnav");
   if(vs){ vn.hidden=false; vn.innerHTML=vs.map(([code,lab],i)=>`<button class="var" role="tab" data-var="${code}" aria-selected="${i===0}">${lab}</button>`).join("");
@@ -68,12 +81,16 @@ function selectSrc(k){
   } else { vn.hidden=true; vn.innerHTML=""; }
   const subs=SOURCES[k].subs(); sub=subs[0][0];
   const sn=document.getElementById("subnav");
-  sn.innerHTML=subs.map(([code,lab],i)=>`<button class="sub" role="tab" data-sub="${code}" aria-selected="${i===0}">${k==="app"?code:lab}${k==="app"?`<small>${lab}</small>`:""}</button>`).join("");
+  renderSubnav();
   sn.onclick=e=>{ const b=e.target.closest("[data-sub]"); if(!b)return; sub=b.dataset.sub; [...sn.children].forEach(c=>c.setAttribute("aria-selected",c===b)); renderView(); };
   document.getElementById("q").value="";
   renderView();
 }
 
+function renderSubnav(){
+  const subs=SOURCES[src].subs();
+  document.getElementById("subnav").innerHTML=subs.map(([code,lab])=>`<button class="sub" role="tab" data-sub="${code}" aria-selected="${code===sub}">${src==="app"?code:lab}${src==="app"?`<small>${lab}</small>`:""}</button>`).join("");
+}
 /* enrich: 모바일 행({r,id})은 lookup으로 제목/썸네일/작가 채움. 시리즈는 자체 필드 사용 */
 function enrichRow(d){
   if(SOURCES[src].caps.series) return { r:d.r, name:d.t, a:d.a||"", th:d.th||"", id:d.id, m:d.m||0, s:0, b:[] };

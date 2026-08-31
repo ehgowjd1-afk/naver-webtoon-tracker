@@ -38,15 +38,23 @@ h1{font-family:"Black Han Sans","IBM Plex Sans KR",sans-serif; font-weight:400; 
 .meta{margin:9px 0 0; color:var(--muted); font-size:13px}
 .meta b{color:var(--ink); font-weight:600}
 .htools{display:flex; gap:8px; flex:none; align-items:center}
-.wsel{border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit; font-size:13px; font-weight:500; border-radius:10px; padding:0 10px; height:38px; cursor:pointer}
+.wsel{border:1px solid var(--border); background:var(--surface); color:var(--ink); font-family:inherit; font-size:13px; font-weight:600; border-radius:9px; padding:0 10px; height:33px; margin-bottom:6px; flex:none; cursor:pointer; max-width:46%}
 .wsel:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
 .themebtn{border:1px solid var(--border); background:var(--surface); color:var(--muted); width:38px; height:38px; border-radius:10px; cursor:pointer; font-size:16px; display:grid; place-items:center; transition:.15s}
 .themebtn:hover{border-color:var(--border-strong); color:var(--ink)}
 .themebtn:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
 
-/* source nav (top level) */
-.srcnav{display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:14px; overflow-x:auto}
-.src{border:0; background:transparent; color:var(--muted); font-family:inherit; font-weight:600; font-size:15px; padding:10px 4px; margin-right:18px; cursor:pointer; position:relative; white-space:nowrap; transition:.13s}
+/* group nav (top level: 네이버웹툰 / 시리즈) */
+.groupnav{display:flex; gap:4px; border-bottom:2px solid var(--border); margin-bottom:12px; overflow-x:auto}
+.grp{border:0; background:transparent; color:var(--muted); font-family:inherit; font-weight:700; font-size:18px; padding:9px 2px; margin-right:22px; cursor:pointer; position:relative; white-space:nowrap; transition:.13s}
+.grp:hover{color:var(--ink)}
+.grp[aria-selected="true"]{color:var(--accent)}
+.grp[aria-selected="true"]::after{content:""; position:absolute; left:0; right:0; bottom:-2px; height:3px; background:var(--accent); border-radius:2px}
+
+/* source nav (second level) + 주차 선택 */
+.srcrow{display:flex; align-items:flex-end; gap:12px; border-bottom:1px solid var(--border); margin-bottom:14px}
+.srcnav{display:flex; gap:4px; overflow-x:auto; flex:1 1 auto; min-width:0}
+.src{border:0; background:transparent; color:var(--muted); font-family:inherit; font-weight:600; font-size:14px; padding:9px 4px; margin-right:16px; cursor:pointer; position:relative; white-space:nowrap; transition:.13s}
 .src:hover{color:var(--ink)}
 .src[aria-selected="true"]{color:var(--accent)}
 .src[aria-selected="true"]::after{content:""; position:absolute; left:0; right:0; bottom:-1px; height:2.5px; background:var(--accent); border-radius:2px}
