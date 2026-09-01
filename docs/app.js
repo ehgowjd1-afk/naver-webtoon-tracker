@@ -18,16 +18,24 @@ const S_MOVE=[["rank","순위순"],["up","상승폭"],["down","하락폭"]];
 const dot = d => (d||"").replace(/-/g,".");
 
 const SOURCES = {
-  app:     { label:"앱 주간", variants:null, subs:()=>["전체","여성","남성"].map(k=>[k,String((APP&&APP.charts&&APP.charts[k]||[]).length)]), data:(v,s)=>APP&&APP.charts[s], caps:{move:1,streak:1,badge:1,tiles:1,gap:1}, filters:F_APP, sorts:S_MOVE, note:()=>`${dot(APP.date)} · 앱 「이번 주 웹툰 랭킹」` },
-  weekday: { label:"요일별", variants:[["app","앱"],["web","웹"]], subs:()=>WEEKDAYS, data:(v,s)=>WEEKDAY&&WEEKDAY[v]&&WEEKDAY[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(WEEKDAY.date)} · 요일별 인기순 · ${v==="app"?"앱(모바일)":"웹(PC)"} · 자동` },
-  genre:   { label:"장르", variants:[["app","앱"],["web","웹"]], subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE[v]&&GENRE[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(GENRE.date)} · 장르별 인기순 · ${v==="app"?"앱(모바일)":"웹(PC)"} · 자동` },
+  app:     { label:"앱 주간", variants:null, subs:()=>["전체","여성","남성"].map(k=>[k,String((APP&&APP.charts&&APP.charts[k]||[]).length)]), data:(v,s)=>APP&&APP.charts[s], caps:{move:1,streak:1,badge:1,tiles:1,gap:1}, filters:F_APP, sorts:S_MOVE, note:()=>`${weekLabel(APP.date)} · 앱 「이번 주 웹툰 랭킹」` },
+  weekday: { label:"요일별", variants:[["app","모바일"],["web","웹"]], subs:()=>WEEKDAYS, data:(v,s)=>WEEKDAY&&WEEKDAY[v]&&WEEKDAY[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(WEEKDAY.date)} · 요일별 인기순 · ${v==="app"?"모바일":"웹(PC)"} · 자동` },
+  genre:   { label:"장르", variants:[["app","모바일"],["web","웹"]], subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE[v]&&GENRE[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(GENRE.date)} · 장르별 인기순 · ${v==="app"?"모바일":"웹(PC)"} · 자동` },
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][s], caps:{move:1,tiles:1,series:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 네이버 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 자동` },
 };
 const GROUPS=[["naver","네이버웹툰",["app","weekday","genre"]],["series","시리즈",["series"]]];
 let group="naver";
 const subLabel = s => src==="app" ? s : (SOURCES[src].subs().find(x=>x[0]===s)||[s,s])[1];
 const varLabel = () => { const vs=SOURCES[src].variants; return vs?(vs.find(x=>x[0]===variant)||["",""])[1]:""; };
-function weekLabel(w){ const p=(w||"").split("-").map(Number); return p.length<3?dot(w):`${p[1]}월 ${Math.ceil(p[2]/7)}째주`; }
+const WKORD=["","첫째","둘째","셋째","넷째","다섯째","여섯째"];
+function weekLabel(w){ // 그 주(월~일) 목요일이 속한 달 기준 N월 M째주 (ISO식)
+  const p=(w||"").split("-").map(Number); if(p.length<3) return dot(w);
+  const dt=new Date(p[0],p[1]-1,p[2]), dow=(dt.getDay()+6)%7;      // 월=0..일=6
+  const thu=new Date(p[0],p[1]-1,p[2]-dow+3);                       // 그 주 목요일
+  const f=new Date(thu.getFullYear(),thu.getMonth(),1), fdow=(f.getDay()+6)%7;
+  const firstThu=1+((3-fdow+7)%7), wk=Math.floor((thu.getDate()-firstThu)/7)+1;
+  return `${thu.getMonth()+1}월 ${WKORD[wk]||wk+"째"}주`;
+}
 function weekLabels(weeks){ const info=weeks.map(w=>{const p=w.split("-").map(Number);return {w,m:p[1],d:p[2],lab:weekLabel(w)};}); const cnt={}; info.forEach(x=>cnt[x.lab]=(cnt[x.lab]||0)+1); const map={}; info.forEach(x=>map[x.w]=cnt[x.lab]>1?`${x.lab} (${x.m}/${x.d})`:x.lab); return map; }
 
 async function fetchJSON(p){ const r=await fetch(p,{cache:"no-cache"}); if(!r.ok) throw new Error(p+" "+r.status); return r.json(); }
