@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=16">
 </head>
 <body>
 <div class="wrap">
@@ -31,7 +31,11 @@
     <nav class="srcnav" id="srcnav" role="tablist" aria-label="랭킹 소스"></nav>
     <select class="wsel" id="wsel" aria-label="주차 선택 (앱 주간)" title="주차 선택"></select>
   </div>
-  <div class="varnav" id="varnav" role="tablist" aria-label="앱/웹 선택" hidden></div>
+  <div class="varnav" id="varnav" role="tablist" aria-label="웹툰/웹소설·앱/웹 선택" hidden></div>
+  <div class="seriesctl" id="seriesctl" hidden>
+    <div class="varnav" id="platnav" role="tablist" aria-label="웹/모바일 선택"></div>
+    <select class="wsel" id="scatsel" aria-label="장르 선택" title="장르 선택"></select>
+  </div>
   <div class="subnav" id="subnav" role="tablist" aria-label="세부 선택"></div>
 
   <section class="tiles" id="tiles" hidden></section>
@@ -75,6 +79,6 @@
 </div>
 
 <script src="xlsx.js?v=1"></script>
-<script src="app.js?v=15"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>

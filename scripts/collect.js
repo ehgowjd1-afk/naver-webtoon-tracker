@@ -47,7 +47,19 @@ function parseMobile(html, startMarker){
 async function appWeekday(){ const o={}; for(const w of WEEKDAYS){ try{ const h=await getText(`https://m.comic.naver.com/webtoon/weekday?week=${w}`,UA_M,"https://m.comic.naver.com/webtoon/weekday"); o[w]=parseMobile(h,"section_list_toon"); }catch(e){o[w]=[];console.error("appWeekday",w,e.message);} await sleep(120);} return o; }
 async function appGenre(){ const o={}; for(const g of GENRES){ try{ const h=await getText(`https://m.comic.naver.com/webtoon/genre?genre=${g}`,UA_M,"https://m.comic.naver.com/webtoon/genre"); o[g]=parseMobile(h,"lst_genre"); }catch(e){o[g]=[];console.error("appGenre",g,e.message);} await sleep(120);} return o; }
 
-/* 시리즈(series.naver HTML) 웹툰/웹소설: {r,t,a,m,id,th} */
+/* 시리즈 카테고리(장르) 코드→이름. 웹툰/웹소설 목록 다름 */
+const SERIES_CATS = {
+  comic: [["ALL","전체장르"],["90","소년"],["99","순정"],["93","드라마"],["88","무협"],["107","BL"]],
+  novel: [["ALL","전체장르"],["201","로맨스"],["202","판타지"],["203","미스터리"],["205","라이트노벨"],["206","무협"],["207","로판"],["208","현판"],["209","BL"]]
+};
+function seriesBadges(it){ // 완결/무료 뱃지 (신규 상승/하락은 별도)
+  const b=[]; const info=(it.match(/info comic_wt"[\s\S]*?<\/p>/)||[""])[0]||it;
+  if(/완결/.test(info) && !/미완결/.test(info)) b.push("완결");
+  const free=(it.match(/free_info[\s\S]*?<span>\s*([^<]*?무료)\s*<\/span>/)||it.match(/(\d+[화권]\s*무료)/)||[])[1];
+  if(free) b.push(free.trim());
+  return b;
+}
+/* PC 웹(series.naver HTML): {r,t,a,m,id,th,b} */
 function parseSeries(html, kind, baseRank){
   const items = html.split(/<li>/).filter(x => new RegExp(kind+"\\/detail\\.series\\?productNo=").test(x) && /<em class="no/.test(x));
   const out = [];
@@ -57,21 +69,42 @@ function parseSeries(html, kind, baseRank){
     const thM = it.match(/class="pic[^"]*"[\s\S]*?<img\s+src="([^"]+)"/);
     const au = [...it.matchAll(/<span class="author">([^<]+)<\/span>/g)].map(m=>m[1].trim());
     let m=0; const mv=it.match(/comic_ico (up|down)[^>]*>[^<]*<\/em><em class="comic_no">(\d+)/); if(mv) m=mv[1]==="up"?Number(mv[2]):-Number(mv[2]);
-    if(idM&&tM) out.push({ r:baseRank+i+1, t:tM[1].trim(), a:au.join(" / "), m, id:Number(idM[1]), th:thM?thM[1]:"" });
+    const b=seriesBadges(it); if(/comic_ico new/.test(it)) b.unshift("신규");
+    if(idM&&tM) out.push({ r:baseRank+i+1, t:tM[1].trim(), a:au.join(" / "), m, id:Number(idM[1]), th:thM?thM[1]:"", b });
   });
   return out;
 }
-async function series(kind){ // kind: comic | novel
-  const o={};
-  for(const p of PERIODS){
-    let all=[];
-    for(let page=1;page<=5;page++){
-      const h=await getText(`https://series.naver.com/${kind}/top100List.series?rankingTypeCode=${p}&categoryCode=ALL&page=${page}`,UA_PC,"https://series.naver.com/");
-      const rows=parseSeries(h,kind,all.length); if(!rows.length)break; all=all.concat(rows); await sleep(180);
+/* 모바일 웹(m.series HTML): {r,t,a,m,id,th,b} — 순위 PC와 다름 */
+function parseSeriesMobile(html, kind, baseRank){
+  const items = html.split(/<li class="lst">/).filter(x => new RegExp(kind+"\\/detail\\.series\\?productNo=").test(x) && /top_num/.test(x));
+  const out=[];
+  items.forEach((it,i)=>{
+    const idM = it.match(/detail\.series\?productNo=(\d+)/);
+    const tM = it.match(/class="tit comic_tit">\s*([^<]+?)\s*</) || it.match(/alt="([^"]*)"/);
+    const thM = it.match(/comic_top_bok[\s\S]*?<img\s+src="([^"]+)"/);
+    const au = [...it.matchAll(/<span class="author">([^<]+)<\/span>/g)].map(m=>m[1].trim());
+    let m=0; const mv=it.match(/comic_ico (up|down)"[^>]*>[^<]*<\/em>\s*<em class="comic_no">(\d+)/); if(mv) m=mv[1]==="up"?+mv[2]:-(+mv[2]);
+    const uds=(it.match(/top_uds"[\s\S]*?<\/span>/)||[""])[0];
+    const b=seriesBadges(it); if(/comic_ico new/.test(uds)) b.unshift("신규");
+    if(idM&&tM) out.push({ r:baseRank+i+1, t:tM[1].trim(), a:au.join(" / "), m, id:Number(idM[1]), th:thM?thM[1]:"", b });
+  });
+  return out;
+}
+/* 통합: 웹툰/웹소설 × 웹/모바일 × 카테고리 × 일/주/월 */
+async function seriesAll(kind){
+  const out = { web:{}, mobile:{} };
+  for(const [code,name] of SERIES_CATS[kind]){
+    out.web[name]={}; out.mobile[name]={};
+    for(const p of PERIODS){
+      let wall=[];
+      for(let page=1;page<=5;page++){ try{ const h=await getText(`https://series.naver.com/${kind}/top100List.series?rankingTypeCode=${p}&categoryCode=${code}&page=${page}`,UA_PC,"https://series.naver.com/"); const rows=parseSeries(h,kind,wall.length); if(!rows.length)break; wall=wall.concat(rows);}catch(e){console.error("series web",kind,name,p,page,e.message);break;} await sleep(130); }
+      out.web[name][p]=wall.slice(0,100);
+      let mall=[];
+      for(let page=1;page<=6;page++){ try{ const h=await getText(`https://m.series.naver.com/${kind}/top100List.series?rankingTypeCode=${p}&categoryCode=${code}&page=${page}`,UA_M,"https://m.series.naver.com/"); const rows=parseSeriesMobile(h,kind,mall.length); if(!rows.length)break; mall=mall.concat(rows);}catch(e){console.error("series mobile",kind,name,p,page,e.message);break;} await sleep(130); }
+      out.mobile[name][p]=mall.slice(0,100);
     }
-    o[p]=all.slice(0,100);
   }
-  return o;
+  return out;
 }
 
 /* 작품 상세(장르·키워드·제작사·관심수·연령·요일·줄거리) — 신규 titleId만 증분 수집 */
@@ -175,7 +208,12 @@ function buildTodayBases(web_wd, app_wd, web_gn, app_gn, s_comic, s_novel){
   const b = {}, put = (key, arr) => { b[key] = Object.fromEntries((arr||[]).map(r => [r.id, r.r])); };
   for(const w of WEEKDAYS){ put("wd_web_"+w, web_wd[w]); put("wd_app_"+w, app_wd[w]); }
   for(const g of GENRES){ put("gn_web_"+g, web_gn[g]); put("gn_app_"+g, app_gn[g]); }
-  for(const p of PERIODS){ put("series_comic_"+p, s_comic[p]); put("series_novel_"+p, s_novel[p]); }
+  for(const p of PERIODS){
+    put("series_comic_web_"+p, s_comic.web["전체장르"]&&s_comic.web["전체장르"][p]);
+    put("series_comic_mobile_"+p, s_comic.mobile["전체장르"]&&s_comic.mobile["전체장르"][p]);
+    put("series_novel_web_"+p, s_novel.web["전체장르"]&&s_novel.web["전체장르"][p]);
+    put("series_novel_mobile_"+p, s_novel.mobile["전체장르"]&&s_novel.mobile["전체장르"][p]);
+  }
   return b;
 }
 function updateHistory(hist, date, todayBases){
@@ -198,13 +236,14 @@ function updateHistory(hist, date, todayBases){
 
 function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(0,10); }
 
-(async ()=>{
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS };
+if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();
   console.log("collecting", date, "…");
   // 웹 먼저(lookup 채움) → 앱은 lookup 참조
   const web_wd = await webWeekday();
   const web_gn = await webGenre();
-  const [app_wd, app_gn, s_comic, s_novel] = await Promise.all([appWeekday(), appGenre(), series("comic"), series("novel")]);
+  const [app_wd, app_gn, s_comic, s_novel] = await Promise.all([appWeekday(), appGenre(), seriesAll("comic"), seriesAll("novel")]);
 
   let existingDetails = {};
   try { existingDetails = JSON.parse(fs.readFileSync(path.join(OUT,"details.json"),"utf8")); } catch(e){}
@@ -226,5 +265,6 @@ function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(
   try { await collectEpisodes(details, updated); } catch(e){ console.error("episodes failed:", e.message); } // best-effort 백필
 
   const c=o=>Object.fromEntries(Object.entries(o).map(([k,v])=>[k,v.length]));
-  console.log("done:", JSON.stringify({ web_wd:c(web_wd), app_wd:c(app_wd), comic:c(s_comic), novel:c(s_novel), details:Object.keys(details).length, histDates:hist.dates.length, histBases:Object.keys(hist.series).length }));
+  const sc=s=>{let n=0,items=0;for(const pf of["web","mobile"])for(const cat in s[pf])for(const p in s[pf][cat]){n++;items+=s[pf][cat][p].length;}return{rankings:n,items};};
+  console.log("done:", JSON.stringify({ web_wd:c(web_wd), app_wd:c(app_wd), comic:sc(s_comic), novel:sc(s_novel), details:Object.keys(details).length, histDates:hist.dates.length, histBases:Object.keys(hist.series).length }));
 })().catch(e=>{ console.error("FAILED:",e); process.exit(1); });

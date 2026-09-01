@@ -129,6 +129,10 @@ ol.board{list-style:none; margin:0; padding:0; display:flex; flex-direction:colu
 .b-rest{background:var(--surface-2); color:var(--faint)}
 .b-fin{background:var(--surface-2); color:var(--muted)}
 .b-up{background:transparent; color:var(--gold); border:1px solid var(--gold); font-size:9.5px; padding:1px 5px}
+.b-free{background:var(--down-soft); color:var(--down)}
+.seriesctl{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px}
+.seriesctl .varnav{margin-bottom:0}
+.seriesctl .wsel{margin-bottom:0; height:34px; max-width:none; flex:0 1 auto}
 .move{display:flex; align-items:center; justify-content:flex-end; gap:5px; font-variant-numeric:tabular-nums; font-weight:600; font-size:14px; min-width:48px}
 .move .arw{font-size:11px}
 .m-up{color:var(--up)} .m-down{color:var(--down)} .m-same{color:var(--faint)}

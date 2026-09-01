@@ -4,11 +4,13 @@ const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp
 const WEEKDAYS = [["mon","월"],["tue","화"],["wed","수"],["thu","목"],["fri","금"],["sat","토"],["sun","일"],["dailyPlus","매일+"]];
 const GENRES = [["HISTORICAL","무협/사극"],["FANTASY","판타지"],["ACTION","액션"],["DRAMA","드라마"],["PURE","로맨스"],["SENSIBILITY","감성"],["DAILY","일상"],["COMIC","개그"],["THRILL","스릴러"],["SPORTS","스포츠"]];
 const PERIODS = [["DAILY","일간"],["WEEKLY","주간"],["MONTHLY","월간"]];
+const SERIES_CATNAMES = { comic:["전체장르","소년","순정","드라마","무협","BL"], novel:["전체장르","로맨스","판타지","미스터리","라이트노벨","무협","로판","현판","BL"] };
+const SERIES_PLATS = [["web","웹"],["mobile","모바일"]];
 
 let APP=null, WEEKDAY=null, GENRE=null, SERIES=null, LOOKUP={id:{},name:{}}, WEEKS=[];
-let src="app", variant=null, sub="전체", fMode="all", sMode="rank", query="";
+let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="";
 let rowsCache=[];
-let DETAILS=null, detailsLoading=null, HISTORY=null, historyLoading=null, KWINDEX=null;
+let DETAILS=null, detailsLoading=null, HISTORY=null, historyLoading=null, KWINDEX=null, seriesLoading=null;
 const DAILYPLUS=new Set();
 
 const F_MOVE=[["all","전체"],["up","상승"],["down","하락"]];
@@ -21,7 +23,7 @@ const SOURCES = {
   app:     { label:"앱 주간", variants:null, subs:()=>["전체","여성","남성"].map(k=>[k,String((APP&&APP.charts&&APP.charts[k]||[]).length)]), data:(v,s)=>APP&&APP.charts[s], caps:{move:1,streak:1,badge:1,tiles:1,gap:1}, filters:F_APP, sorts:S_MOVE, note:()=>`${weekLabel(APP.date)} · 앱 「이번 주 웹툰 랭킹」` },
   weekday: { label:"요일별", variants:[["app","모바일"],["web","웹"]], subs:()=>WEEKDAYS, data:(v,s)=>WEEKDAY&&WEEKDAY[v]&&WEEKDAY[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(WEEKDAY.date)} · 요일별 인기순 · ${v==="app"?"모바일":"웹(PC)"} · 자동` },
   genre:   { label:"장르", variants:[["app","모바일"],["web","웹"]], subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE[v]&&GENRE[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(GENRE.date)} · 장르별 인기순 · ${v==="app"?"모바일":"웹(PC)"} · 자동` },
-  series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][s], caps:{move:1,tiles:1,series:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 네이버 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 자동` },
+  series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][platform]&&SERIES[v][platform][scat]&&SERIES[v][platform][scat][s], caps:{move:1,tiles:1,series:1,badge:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · ${platform==="web"?"웹(PC)":"모바일"} · ${scat} · 자동` },
 };
 const GROUPS=[["naver","네이버웹툰",["app","weekday","genre"]],["series","시리즈",["series"]]];
 let group="naver";
@@ -46,12 +48,11 @@ async function boot(){
   let idx;
   try{ idx=await fetchJSON("data/index.json"); }catch(e){ fail(); return; }
   WEEKS=idx.weeks.slice();
-  const R=await Promise.allSettled([ fetchJSON(`data/${idx.latest}.json`), fetchJSON("data/weekday.json"), fetchJSON("data/genre.json"), fetchJSON("data/series.json"), fetchJSON("data/lookup.json") ]);
+  const R=await Promise.allSettled([ fetchJSON(`data/${idx.latest}.json`), fetchJSON("data/weekday.json"), fetchJSON("data/genre.json"), fetchJSON("data/lookup.json") ]);
   APP=R[0].status==="fulfilled"?R[0].value:{date:idx.latest,charts:{전체:[],여성:[],남성:[]}};
   WEEKDAY=R[1].status==="fulfilled"?R[1].value:{date:"",web:{},app:{}};
   GENRE=R[2].status==="fulfilled"?R[2].value:{date:"",web:{},app:{}};
-  SERIES=R[3].status==="fulfilled"?R[3].value:{date:"",comic:{},novel:{}};
-  LOOKUP=R[4].status==="fulfilled"?R[4].value:{id:{},name:{}};
+  LOOKUP=R[3].status==="fulfilled"?R[3].value:{id:{},name:{}};
   try{ for(const v of ["web","app"]) (WEEKDAY[v]&&WEEKDAY[v].dailyPlus||[]).forEach(r=>DAILYPLUS.add(r.id)); }catch(e){}
 
   const wsel=document.getElementById("wsel"), wl=weekLabels(WEEKS);
@@ -65,6 +66,18 @@ async function boot(){
   selectGroup("naver");
 }
 function fail(){ document.getElementById("board").innerHTML=`<li class="empty">데이터를 불러오지 못했어요. 새로고침 해주세요.</li>`; }
+function ensureSeries(){ if(SERIES) return Promise.resolve(); if(!seriesLoading) seriesLoading=fetchJSON("data/series.json").then(d=>{SERIES=d;}).catch(()=>{SERIES={date:"",comic:{},novel:{}};}); return seriesLoading; }
+function setupSeriesCtl(){
+  const cats=SERIES_CATNAMES[variant]||["전체장르"];
+  if(!cats.includes(scat)) scat=cats[0];
+  const pn=document.getElementById("platnav");
+  pn.innerHTML=SERIES_PLATS.map(([c,l])=>`<button class="var" role="tab" data-plat="${c}" aria-selected="${c===platform}">${l}</button>`).join("");
+  pn.onclick=e=>{ const b=e.target.closest("[data-plat]"); if(!b)return; platform=b.dataset.plat; [...pn.children].forEach(c=>c.setAttribute("aria-selected",c===b)); renderView(); };
+  const cs=document.getElementById("scatsel");
+  cs.innerHTML=cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  cs.value=scat;
+  cs.onchange=()=>{ scat=cs.value; renderView(); };
+}
 
 function renderGroupNav(){
   document.getElementById("groupnav").innerHTML=GROUPS.map(([k,lab])=>`<button class="grp" role="tab" data-grp="${k}" aria-selected="${k===group}">${lab}</button>`).join("");
@@ -85,13 +98,16 @@ function selectSrc(k){
   const vs=SOURCES[k].variants; variant = vs?vs[0][0]:null;
   const vn=document.getElementById("varnav");
   if(vs){ vn.hidden=false; vn.innerHTML=vs.map(([code,lab],i)=>`<button class="var" role="tab" data-var="${code}" aria-selected="${i===0}">${lab}</button>`).join("");
-    vn.onclick=e=>{ const b=e.target.closest("[data-var]"); if(!b)return; variant=b.dataset.var; [...vn.children].forEach(c=>c.setAttribute("aria-selected",c===b)); renderView(); };
+    vn.onclick=e=>{ const b=e.target.closest("[data-var]"); if(!b)return; variant=b.dataset.var; [...vn.children].forEach(c=>c.setAttribute("aria-selected",c===b)); if(k==="series") setupSeriesCtl(); renderView(); };
   } else { vn.hidden=true; vn.innerHTML=""; }
+  document.getElementById("seriesctl").hidden = k!=="series";
   const subs=SOURCES[k].subs(); sub=subs[0][0];
   const sn=document.getElementById("subnav");
   renderSubnav();
-  sn.onclick=e=>{ const b=e.target.closest("[data-sub]"); if(!b)return; sub=b.dataset.sub; [...sn.children].forEach(c=>c.setAttribute("aria-selected",c===b)); renderView(); };
+  sn.onclick=e=>{ const b=e.target.closest("[data-sub]"); if(!b)return; sub=b.dataset.sub; renderSubnav(); renderList(); };
   document.getElementById("q").value="";
+  if(k==="series" && !SERIES){ document.getElementById("board").innerHTML=`<li class="empty">시리즈 불러오는 중…</li>`; ensureSeries().then(()=>{ setupSeriesCtl(); renderView(); }); return; }
+  if(k==="series") setupSeriesCtl();
   renderView();
 }
 
@@ -101,7 +117,7 @@ function renderSubnav(){
 }
 /* enrich: 모바일 행({r,id})은 lookup으로 제목/썸네일/작가 채움. 시리즈는 자체 필드 사용 */
 function enrichRow(d){
-  if(SOURCES[src].caps.series) return { r:d.r, name:d.t, a:d.a||"", th:d.th||"", id:d.id, m:d.m||0, s:0, b:[] };
+  if(SOURCES[src].caps.series) return { r:d.r, name:d.t, a:d.a||"", th:d.th||"", id:d.id, m:d.m||0, s:0, b:d.b||[] };
   let id = d.id!=null ? d.id : (d.t!=null ? LOOKUP.name[d.t] : null);
   const info = id!=null ? LOOKUP.id[id] : null; // [name, thumb, author]
   return {
@@ -137,7 +153,7 @@ document.getElementById("q").addEventListener("input", e=>{ query=e.target.value
 function renderStats(){
   const D=viewRows(), caps=SOURCES[src].caps;
   const up=[...D].filter(d=>d.m>0).sort((a,b)=>b.m-a.m), down=[...D].filter(d=>d.m<0).sort((a,b)=>a.m-b.m);
-  const news=D.filter(d=>d.b.includes("신작")||d.b.includes("진입")), streaks=[...D].filter(d=>d.s>0).sort((a,b)=>b.s-a.s);
+  const news=D.filter(d=>d.b.includes("신작")||d.b.includes("진입")||d.b.includes("신규")), streaks=[...D].filter(d=>d.s>0).sort((a,b)=>b.s-a.s);
   const tu=up[0],td=down[0],ts=streaks[0];
   const tiles=[
     {lab:"▲ 최대 상승",cls:"up",big:tu?esc(tu.name):"—",sub:tu?`${tu.r}위 · ▲${tu.m}`:""},
@@ -174,9 +190,11 @@ function badgeHtml(d){
   if(b.includes("신작")) h+=`<span class="badge b-new">신작</span>`;
   if(b.includes("진입")) h+=`<span class="badge b-enter">진입</span>`;
   if(b.includes("재진입")) h+=`<span class="badge b-enter">재진입</span>`;
+  if(b.includes("신규")) h+=`<span class="badge b-new">신규</span>`;
   if(b.includes("완결")) h+=`<span class="badge b-fin">완결</span>`;
   if(b.includes("휴재")) h+=`<span class="badge b-rest">휴재</span>`;
   if(b.includes("UP")) h+=`<span class="badge b-up">UP</span>`;
+  b.filter(x=>/무료/.test(x)).forEach(fr=>{ h+=`<span class="badge b-free">${esc(fr)}</span>`; });
   return h;
 }
 function renderList(){
@@ -324,7 +342,7 @@ function currentBasisKey(){
   if(src==="app") return "app_"+sub;
   if(src==="weekday") return "wd_"+variant+"_"+sub;
   if(src==="genre") return "gn_"+variant+"_"+sub;
-  if(src==="series") return "series_"+variant+"_"+sub;
+  if(src==="series") return "series_"+variant+"_"+platform+"_"+sub;
 }
 /* 날짜별 순위 추이 데이터: {dates:[], rankFn:(row)=>[각 날짜 순위]} */
 async function trendData(){
@@ -343,7 +361,7 @@ async function exportCSV(){
   const findRank=(rows,byId,d)=>{ if(!rows)return null; const row=byId?rows.find(r=>r.id===d.id):rows.find(r=>r.t===d.name); return row?row.r:null; };
   const cross=d=>{
     const E=[];
-    if(SOURCES[src].caps.series){ for(const [p,pl] of PERIODS){ const r=findRank(SERIES[variant]&&SERIES[variant][p],true,d); if(r)E.push((variant==="comic"?"웹툰":"웹소설")+pl+r); } }
+    if(SOURCES[src].caps.series){ const base=SERIES[variant]&&SERIES[variant][platform]&&SERIES[variant][platform][scat]; for(const [p,pl] of PERIODS){ const r=findRank(base&&base[p],true,d); if(r)E.push((variant==="comic"?"웹툰":"웹소설")+(platform==="web"?"웹":"모바일")+pl+r); } }
     else{
       for(const c of ["전체","여성","남성"]){ const r=findRank(APP&&APP.charts[c],false,d); if(r)E.push("앱"+c+r); }
       for(const [w,wl] of WEEKDAYS) for(const v of ["web","app"]){ const r=findRank(WEEKDAY[v]&&WEEKDAY[v][w],true,d); if(r)E.push("요일"+(v==="app"?"앱":"웹")+wl+r); }
@@ -385,8 +403,7 @@ function basisLabel(key){
   if(key.startsWith("wd_app_")) return "요일 앱 "+(WDMAP[key.slice(7)]||key.slice(7));
   if(key.startsWith("gn_web_")) return "장르 웹 "+(GNMAP[key.slice(7)]||key.slice(7));
   if(key.startsWith("gn_app_")) return "장르 앱 "+(GNMAP[key.slice(7)]||key.slice(7));
-  if(key.startsWith("series_comic_")) return "시리즈 웹툰 "+(PMAP[key.slice(13)]||key.slice(13));
-  if(key.startsWith("series_novel_")) return "시리즈 웹소설 "+(PMAP[key.slice(13)]||key.slice(13));
+  if(key.startsWith("series_comic_")||key.startsWith("series_novel_")){ const svc=key.startsWith("series_comic_")?"웹툰":"웹소설"; const parts=key.slice(13).split("_"); const p=parts.pop(); const pf=parts.join("_"); return "시리즈 "+svc+(pf?" "+(pf==="web"?"웹":pf==="mobile"?"모바일":pf):"")+" "+(PMAP[p]||p); }
   return key;
 }
 /* 작품별 순위 추이 — 기준(basis)별 시트로 나눈 xlsx */
