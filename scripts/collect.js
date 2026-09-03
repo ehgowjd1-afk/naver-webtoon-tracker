@@ -107,6 +107,38 @@ async function seriesAll(kind){
   return out;
 }
 
+/* 시리즈 프로모션(무료·이벤트): 오늘부터무료/타임딜/매일무료 — m.series 큐레이션 목록 */
+function parsePromo(html, kind){
+  const items = html.split(/<li class="lst">/).filter(x => new RegExp(kind+"\\/detail\\.series\\?productNo=").test(x));
+  const out=[];
+  items.forEach((it,i)=>{
+    const idM = it.match(/detail\.series\?productNo=(\d+)/);
+    let t=""; const tb=it.match(/<h5 class="tit">([\s\S]*?)<\/h5>/); if(tb) t=tb[1].replace(/<span class="u_hc">[\s\S]*?<\/span>/g,"").replace(/<[^>]+>/g,"").replace(/&nbsp;/g," ").replace(/\s+/g," ").trim();
+    if(!t){ const al=it.match(/alt="([^"]*)"/); t=al?al[1].trim():""; }
+    const thM = it.match(/thmb_list_img[\s\S]*?<img[^>]*\ssrc="([^"]+)"/);
+    const au = [...it.matchAll(/<span class="author">([^<]+)<\/span>/g)].map(m=>m[1].trim()).join(" / ");
+    const catM = it.match(/info_writer">\s*([^<|&]+?)\s*(?:&nbsp;|\||<)/);
+    const remain = (it.match(/date_remain">\s*([^<]+?)\s*</)||[])[1] || "";
+    const free = (it.match(/free_info[\s\S]*?<span>\s*([^<]*?무료)\s*<\/span>/)||[])[1] || "";
+    const b=[]; if(/<span class="new2">/.test(it))b.push("신규"); if(/adult2/.test(it))b.push("19금"); if(/ico_onlyfree/.test(it))b.push("매일무료"); if(/ico_edition/.test(it))b.push("에디션"); if(/완결/.test(it)&&!/미완결/.test(it))b.push("완결"); if(free)b.push(free.trim()); if(remain)b.push(remain.trim());
+    if(idM&&t) out.push({ r:i+1, t, a:au, cat:catM?catM[1].trim():"", th:thM?thM[1]:"", id:Number(idM[1]), m:0, b });
+  });
+  return out;
+}
+async function collectPromo(){
+  const TYPES=[["freeFromToday","freeFromTodayList"],["timeDeal","timeDealList"],["hourlyFree","hourlyFreeList"]];
+  const out={};
+  for(const kind of ["comic","novel"]){
+    out[kind]={};
+    for(const [key,page] of TYPES){
+      try{ const h=await getText(`https://m.series.naver.com/${kind}/${page}.series`,UA_M,"https://m.series.naver.com/"); out[kind][key]=parsePromo(h,kind); }
+      catch(e){ out[kind][key]=[]; console.error("promo",kind,key,e.message); }
+      await sleep(120);
+    }
+  }
+  return out;
+}
+
 /* 작품 상세(장르·키워드·제작사·관심수·연령·요일·줄거리) — 신규 titleId만 증분 수집 */
 async function collectDetails(existing){
   const details = existing || {};
@@ -236,7 +268,7 @@ function updateHistory(hist, date, todayBases){
 
 function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(0,10); }
 
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();
   console.log("collecting", date, "…");
@@ -258,6 +290,7 @@ if (require.main === module) (async ()=>{
   fs.writeFileSync(path.join(OUT,"weekday.json"), JSON.stringify({ updated, date, web:web_wd, app:app_wd }));
   fs.writeFileSync(path.join(OUT,"genre.json"), JSON.stringify({ updated, date, web:web_gn, app:app_gn }));
   fs.writeFileSync(path.join(OUT,"series.json"), JSON.stringify({ updated, date, comic:s_comic, novel:s_novel }));
+  try { const promo = await collectPromo(); fs.writeFileSync(path.join(OUT,"promo.json"), JSON.stringify({ updated, date, comic:promo.comic, novel:promo.novel })); } catch(e){ console.error("promo failed:", e.message); }
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
   fs.writeFileSync(path.join(OUT,"details.json"), JSON.stringify(details));
   fs.writeFileSync(path.join(OUT,"history.json"), JSON.stringify(hist));

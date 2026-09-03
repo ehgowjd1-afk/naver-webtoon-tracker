@@ -130,6 +130,9 @@ ol.board{list-style:none; margin:0; padding:0; display:flex; flex-direction:colu
 .b-fin{background:var(--surface-2); color:var(--muted)}
 .b-up{background:transparent; color:var(--gold); border:1px solid var(--gold); font-size:9.5px; padding:1px 5px}
 .b-free{background:var(--down-soft); color:var(--down)}
+.b-adult{background:var(--up-soft); color:var(--up)}
+.b-ed{background:var(--surface-2); color:var(--muted)}
+.b-deadline{background:transparent; color:var(--faint); border:1px solid var(--border)}
 .seriesctl{display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:14px}
 .seriesctl .varnav{margin-bottom:0}
 .seriesctl .wsel{margin-bottom:0; height:34px; max-width:none; flex:0 1 auto}
