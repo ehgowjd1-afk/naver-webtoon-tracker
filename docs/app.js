@@ -11,6 +11,7 @@ let APP=null, WEEKDAY=null, GENRE=null, SERIES=null, PROMO=null, LOOKUP={id:{},n
 let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="";
 let rowsCache=[];
 let DETAILS=null, detailsLoading=null, HISTORY=null, historyLoading=null, KWINDEX=null, seriesLoading=null, promoLoading=null;
+let SERIESDET=null, seriesDetLoading=null;
 const DAILYPLUS=new Set();
 
 const F_MOVE=[["all","전체"],["up","상승"],["down","하락"]];
@@ -69,6 +70,21 @@ async function boot(){
 function fail(){ document.getElementById("board").innerHTML=`<li class="empty">데이터를 불러오지 못했어요. 새로고침 해주세요.</li>`; }
 function ensureSeries(){ if(SERIES) return Promise.resolve(); if(!seriesLoading) seriesLoading=fetchJSON("data/series.json").then(d=>{SERIES=d;}).catch(()=>{SERIES={date:"",comic:{},novel:{}};}); return seriesLoading; }
 function ensurePromo(){ if(PROMO) return Promise.resolve(); if(!promoLoading) promoLoading=fetchJSON("data/promo.json").then(d=>{PROMO=d;}).catch(()=>{PROMO={date:"",comic:{},novel:{}};}); return promoLoading; }
+function ensureSeriesDetails(){ if(SERIESDET) return Promise.resolve(); if(!seriesDetLoading) seriesDetLoading=fetchJSON("data/series_details.json").then(d=>{SERIESDET=d;}).catch(()=>{SERIESDET={};}); return seriesDetLoading; }
+function seriesDetailHtml(sd){
+  const info=[];
+  if(sd.g) info.push(["장르", sd.g]);
+  if(sd.ep) info.push(["회차", sd.ep+"화"+(sd.status?" · "+sd.status:"")]);
+  if(sd.dl) info.push(["다운로드", sd.dl]);
+  if(sd.star) info.push(["평점", "★ "+sd.star]);
+  if(sd.cmt) info.push(["댓글", sd.cmt+"개"]);
+  let h="";
+  if(info.length) h+=`<div class="mrows">`+info.map(([k,v])=>`<div class="mrow"><span class="mk">${k}</span><span class="mv">${esc(v)}</span></div>`).join("")+`</div>`;
+  const kws=(sd.k||[]);
+  if(kws.length) h+=`<div class="mkw">`+kws.map(t=>`<span class="kw">#${esc(t)}</span>`).join("")+`</div>`;
+  if(sd.syn) h+=`<p class="msyn">${esc(sd.syn)}</p>`;
+  return h||'<div class="mloading">상세 정보 없음</div>';
+}
 function setupSeriesCtl(){
   const cats=SERIES_CATNAMES[variant]||["전체장르"];
   if(!cats.includes(scat)) scat=cats[0];
@@ -275,7 +291,9 @@ function crossBasisHtml(d, isSeries){
   const findRank=(rows,byId)=>{ if(!rows)return null; const row=byId?rows.find(r=>r.id===d.id):rows.find(r=>r.t===d.name); return row?row.r:null; };
   const E=[];
   if(isSeries){
-    for(const [p,pl] of PERIODS){ const r=findRank(SERIES[variant]&&SERIES[variant][p],true); if(r) E.push([`${variant==="comic"?"웹툰":"웹소설"} ${pl}`, `series_${variant}_${p}`, r]); }
+    if(src!=="series" || !SERIES) return "";
+    const base=SERIES[variant]&&SERIES[variant][platform]&&SERIES[variant][platform][scat];
+    for(const [p,pl] of PERIODS){ const r=findRank(base&&base[p],true); if(r) E.push([`${variant==="comic"?"웹툰":"웹소설"} ${platform==="web"?"웹":"모바일"} ${pl}`, `series_${variant}_${platform}_${p}`, r]); }
   } else {
     for(const c of ["전체","여성","남성"]){ const r=findRank(APP&&APP.charts[c],false); if(r) E.push([`앱주간 ${c}`, `app_${c}`, r]); }
     for(const [w,wl] of WEEKDAYS) for(const v of ["web","app"]){ const r=findRank(WEEKDAY[v]&&WEEKDAY[v][w],true); if(r) E.push([`요일 ${v==="app"?"앱":"웹"} ${wl}`, `wd_${v}_${w}`, r]); }
@@ -294,6 +312,7 @@ function openModal(d){
   const badges=badgeHtml(d)+(caps.move?`<span class="badge ${d.m>0?"b-new":d.m<0?"b-rest":"b-fin"}">${d.m>0?"▲"+d.m:d.m<0?"▼"+Math.abs(d.m):"변동없음"}</span>`:"");
   const ctx=`${esc(SOURCES[src].label)}${variant?" · "+esc(varLabel()):""} · ${esc(subLabel(sub))} · <b>${d.r}위</b>`;
   const webtoon = !caps.series && d.id!=null;
+  const isSeries = caps.series && d.id!=null;
   document.getElementById("modalBody").innerHTML=`
     <div class="mtop">
       ${d.th?`<img class="mthumb" src="${esc(d.th)}" alt="">`:`<div class="mthumb"></div>`}
@@ -304,14 +323,16 @@ function openModal(d){
         <div class="mbadges">${badges}</div>
       </div>
     </div>
-    <div class="mdetail" id="mdetail">${webtoon?'<div class="mloading">상세 불러오는 중…</div>':""}</div>
+    <div class="mdetail" id="mdetail">${webtoon||isSeries?'<div class="mloading">상세 불러오는 중…</div>':""}</div>
     <div id="mcross"></div>
     <button class="mepbtn" data-trend="1" data-id="${d.id}" data-name="${esc(d.name)}">⬇ 순위 추이 엑셀 (기준별 시트)</button>
     ${webtoon?`<button class="mepbtn" data-id="${d.id}" data-name="${esc(d.name)}">⬇ 회차별 댓글·별점 엑셀(CSV)</button>`:""}
     <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
   document.getElementById("modal").hidden=false;
-  Promise.all([webtoon?ensureDetails():Promise.resolve(), ensureHistory()]).then(()=>{
-    if(webtoon){ const el=document.getElementById("mdetail"); if(el) el.innerHTML = (DETAILS[d.id]?detailHtml(DETAILS[d.id]):'<div class="mloading">상세 정보 없음</div>'); }
+  Promise.all([webtoon?ensureDetails():isSeries?ensureSeriesDetails():Promise.resolve(), ensureHistory()]).then(()=>{
+    const el=document.getElementById("mdetail");
+    if(webtoon && el) el.innerHTML = (DETAILS[d.id]?detailHtml(DETAILS[d.id]):'<div class="mloading">상세 정보 없음</div>');
+    else if(isSeries && el) el.innerHTML = (SERIESDET&&SERIESDET[d.id])?seriesDetailHtml(SERIESDET[d.id]):'<div class="mloading">상세 수집 중 — 매일 추가됩니다</div>';
     const cx=document.getElementById("mcross"); if(cx) cx.innerHTML=crossBasisHtml(d, caps.series);
   });
 }

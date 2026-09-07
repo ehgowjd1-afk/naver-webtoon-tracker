@@ -139,6 +139,37 @@ async function collectPromo(){
   return out;
 }
 
+/* 시리즈 작품 상세: detail.series의 og:description(회차·장르·키워드·줄거리) + 본문(다운수·평점·댓글수) */
+function parseSeriesDetail(html){
+  const ogm = html.match(/<meta property="og:description" content="([^"]*)"/);
+  const desc = (ogm ? ogm[1] : "").replace(/&#034;/g,'"').replace(/&quot;/g,'"').replace(/&amp;/g,"&").replace(/&#039;/g,"'");
+  const parts = desc.split(/줄거리\s*:/);
+  const meta = parts[0] || "", syn = (parts[1] || "").trim();
+  const epm = meta.match(/(\d+)\s*화\s*(연재중|완결)?/);
+  const ep = epm ? Number(epm[1]) : 0, status = epm && epm[2] ? epm[2] : "";
+  const tags = [...meta.matchAll(/#([^\s,#]+)/g)].map(m => m[1]);   // [SERVICE, 장르, kw...]
+  const g = tags[1] || "", k = tags.slice(2);
+  const dl = (html.match(/btn_download"><span>([^<]+)</) || [])[1] || "";
+  const star = (html.match(/score_area[\s\S]*?<em>([^<]+)</) || [])[1] || "";
+  const cmt = (html.match(/commentCount">([^<]+)</) || [])[1] || "";
+  return { g, k, dl, star, cmt, ep, status, syn };
+}
+async function collectSeriesDetails(seriesData, existing){
+  const det = existing || {};
+  const seen = new Set(), order = [];
+  for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const cat in (seriesData[kind]||{})[pf]||{}) for(const p in seriesData[kind][pf][cat]) for(const it of seriesData[kind][pf][cat][p]){ if(!seen.has(it.id)){ seen.add(it.id); order.push([it.id, kind]); } }
+  const CAP = 300; let done = 0;
+  for(const [id, kind] of order){
+    if(det[id]) continue;          // 증분: 이미 있으면 skip
+    if(done >= CAP) break;
+    try{ const h = await getText(`https://series.naver.com/${kind}/detail.series?productNo=${id}`, UA_PC, "https://series.naver.com/"); det[id] = parseSeriesDetail(h); det[id].kind = kind; }
+    catch(e){ /* skip */ }
+    done++; await sleep(120);
+  }
+  console.log("series details:", done, "신규 수집 / 총", Object.keys(det).length, "/", order.length);
+  return det;
+}
+
 /* 작품 상세(장르·키워드·제작사·관심수·연령·요일·줄거리) — 신규 titleId만 증분 수집 */
 async function collectDetails(existing){
   const details = existing || {};
@@ -268,7 +299,7 @@ function updateHistory(hist, date, todayBases){
 
 function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(0,10); }
 
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();
   console.log("collecting", date, "…");
@@ -291,6 +322,7 @@ if (require.main === module) (async ()=>{
   fs.writeFileSync(path.join(OUT,"genre.json"), JSON.stringify({ updated, date, web:web_gn, app:app_gn }));
   fs.writeFileSync(path.join(OUT,"series.json"), JSON.stringify({ updated, date, comic:s_comic, novel:s_novel }));
   try { const promo = await collectPromo(); fs.writeFileSync(path.join(OUT,"promo.json"), JSON.stringify({ updated, date, comic:promo.comic, novel:promo.novel })); } catch(e){ console.error("promo failed:", e.message); }
+  try { let sd={}; try{ sd=JSON.parse(fs.readFileSync(path.join(OUT,"series_details.json"),"utf8")); }catch(e){} sd=await collectSeriesDetails({comic:s_comic, novel:s_novel}, sd); fs.writeFileSync(path.join(OUT,"series_details.json"), JSON.stringify(sd)); } catch(e){ console.error("series details failed:", e.message); }
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
   fs.writeFileSync(path.join(OUT,"details.json"), JSON.stringify(details));
   fs.writeFileSync(path.join(OUT,"history.json"), JSON.stringify(hist));
