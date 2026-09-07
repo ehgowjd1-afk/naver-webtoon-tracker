@@ -46,7 +46,7 @@ async function fetchJSON(p){ const r=await fetch(p,{cache:"no-cache"}); if(!r.ok
 
 async function boot(){
   try{ const sv=localStorage.getItem("wt-theme"); if(sv)document.documentElement.setAttribute("data-theme",sv); }catch(e){}
-  wireTheme(); wireModal();
+  wireTheme(); wireModal(); wireGlobalSearch();
   let idx;
   try{ idx=await fetchJSON("data/index.json"); }catch(e){ fail(); return; }
   WEEKS=idx.weeks.slice();
@@ -350,6 +350,55 @@ function openKeywordList(kw){
         <span class="klname">${esc(x.info[0])}<small>${esc(det.g||"")}${det.star?" · ★"+det.star:""}</small></span></a>`;
     }).join("")}</div>`;
   document.getElementById("modal").hidden=false;
+}
+/* 검색결과 → 작품 상세 모달 (현재 화면과 무관, 자립형) */
+function openWorkModal(w){
+  const isWt = w.kind==="webtoon";
+  const url = isWt ? `https://comic.naver.com/webtoon/list?titleId=${w.id}` : `https://series.naver.com/${w.kind}/detail.series?productNo=${w.id}`;
+  const label = isWt ? "네이버웹툰" : ("시리즈 "+(w.kind==="comic"?"웹툰":"웹소설"));
+  document.getElementById("modalBody").innerHTML=`
+    <div class="mtop">
+      ${w.th?`<img class="mthumb" src="${esc(w.th)}" alt="">`:`<div class="mthumb"></div>`}
+      <div style="min-width:0">
+        <div class="mrank">${esc(label)}</div>
+        <div class="mtitle">${esc(w.name)}</div>
+        <div class="mauth">${esc(w.a||"")}</div>
+      </div>
+    </div>
+    <div class="mdetail" id="mdetail"><div class="mloading">상세 불러오는 중…</div></div>
+    <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
+  document.getElementById("modal").hidden=false;
+  (isWt?ensureDetails():ensureSeriesDetails()).then(()=>{
+    const el=document.getElementById("mdetail"); if(!el) return;
+    if(isWt) el.innerHTML = DETAILS[w.id]?detailHtml(DETAILS[w.id]):'<div class="mloading">상세 정보 없음</div>';
+    else el.innerHTML = (SERIESDET&&SERIESDET[w.id])?seriesDetailHtml(SERIESDET[w.id]):'<div class="mloading">상세 수집 중 — 매일 추가됩니다</div>';
+  });
+}
+/* 전체 작품 검색: 웹툰(LOOKUP) + 시리즈(SERIES) 통합 인덱스 */
+let GINDEX=null;
+function buildGIndex(){
+  const a=[];
+  for(const id in (LOOKUP.id||{})){ const v=LOOKUP.id[id]; if(v&&v[0]) a.push({kind:"webtoon", id:+id, name:v[0], th:v[1]||"", a:v[2]||""}); }
+  if(SERIES){ const seen=new Set(); for(const k of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const c in (SERIES[k]||{})[pf]||{}) for(const p in SERIES[k][pf][c]) for(const it of SERIES[k][pf][c][p]){ if(!seen.has("s"+it.id)){ seen.add("s"+it.id); a.push({kind:k, id:it.id, name:it.t, th:it.th||"", a:it.a||""}); } } }
+  return a;
+}
+function wireGlobalSearch(){
+  const q=document.getElementById("gq"), box=document.getElementById("gresults");
+  if(!q) return;
+  q.addEventListener("focus", ()=>{ ensureDetails(); ensureSeriesDetails(); ensureSeries().then(()=>{ GINDEX=null; if(q.value.trim()) q.dispatchEvent(new Event("input")); }); }, {once:false});
+  q.addEventListener("input", ()=>{
+    const v=q.value.trim().toLowerCase();
+    if(!v){ box.hidden=true; box.innerHTML=""; return; }
+    if(!GINDEX) GINDEX=buildGIndex();
+    const res=GINDEX.filter(x=>x.name.toLowerCase().includes(v)).slice(0,16);
+    box.hidden=false;
+    if(!res.length){ box.innerHTML=`<div class="gnone">검색 결과 없어요</div>`; box._res=[]; return; }
+    box.innerHTML=res.map((x,i)=>`<button class="gres" data-gi="${i}"><img loading="lazy" src="${esc(x.th)}" alt=""><span style="min-width:0"><span class="gn">${esc(x.name)}</span><span class="gm">${x.kind==="webtoon"?"웹툰":x.kind==="comic"?"시리즈 웹툰":"시리즈 웹소설"}${x.a?" · "+esc(x.a):""}</span></span></button>`).join("");
+    box._res=res;
+  });
+  box.addEventListener("click", e=>{ const b=e.target.closest("[data-gi]"); if(!b)return; const w=(box._res||[])[+b.dataset.gi]; if(w){ box.hidden=true; q.value=""; openWorkModal(w); } });
+  document.addEventListener("click", e=>{ if(!e.target.closest(".gsearch")) box.hidden=true; });
+  q.addEventListener("keydown", e=>{ if(e.key==="Escape"){ box.hidden=true; q.blur(); } });
 }
 function wireModal(){
   const modal=document.getElementById("modal"), close=()=>{ modal.hidden=true; };

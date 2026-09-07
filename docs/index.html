@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=17">
+<link rel="stylesheet" href="style.css?v=19">
 </head>
 <body>
 <div class="wrap">
@@ -21,6 +21,11 @@
       <p class="meta" id="meta">—</p>
     </div>
     <div class="htools">
+      <div class="gsearch">
+        <svg class="gsi" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
+        <input id="gq" type="search" placeholder="전체 작품 검색" autocomplete="off" aria-label="전체 작품 검색">
+        <div class="gresults" id="gresults" hidden></div>
+      </div>
       <button class="themebtn" id="dlbtn" aria-label="엑셀 다운로드" title="현재 화면 엑셀(CSV) 다운로드">⬇</button>
       <button class="themebtn" id="tbtn" aria-label="테마 전환" title="라이트/다크 전환">◐</button>
     </div>
@@ -79,6 +84,6 @@
 </div>
 
 <script src="xlsx.js?v=1"></script>
-<script src="app.js?v=18"></script>
+<script src="app.js?v=20"></script>
 </body>
 </html>
