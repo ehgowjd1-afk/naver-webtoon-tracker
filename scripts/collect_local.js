@@ -34,7 +34,7 @@ async function getText(url) { const r = await fetch(url, { headers: headers() })
 
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(D, f), "utf8")); } catch (e) { return d; } };
 const normName  = s => String(s || "").replace(/\s*\[[^\]]*\]\s*$/, "").replace(/\s+/g, "");                     // 프론트와 동일(연동 키)
-const normMatch = s => String(s || "").replace(/\s*[\[(<][^\])>]*[\])>]\s*$/, "").replace(/\s+/g, "").toLowerCase(); // 검색결과 매칭용(괄호도 제거)
+function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^\])>]*[\])>]\s*$/, ""); }while(s!==p); return s.replace(/\s+/g,"").toLowerCase(); } // 검색결과 매칭용: 뒤쪽 [독점]·(총 N화) 등 괄호 여러개 모두 제거
 
 (async () => {
   const t0 = Date.now();
