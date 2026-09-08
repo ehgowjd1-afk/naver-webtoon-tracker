@@ -21,10 +21,10 @@ const S_MOVE=[["rank","순위순"],["up","상승폭"],["down","하락폭"]];
 const S_APP=[["rank","순위순"],["up","상승폭"],["down","하락폭"],["revenue","시리즈 매출추정순"]];
 const dot = d => (d||"").replace(/-/g,".");
 /* 시리즈 매출 추정: 시리즈 다운로드수(문자열)→숫자, 매출=다운수×320×0.9×0.6%(×회차수) */
-function parseDl(s){ if(!s) return 0; s=String(s).replace(/,/g,""); let m; if(m=s.match(/([\d.]+)억/)) return Math.round(parseFloat(m[1])*1e8); if(m=s.match(/([\d.]+)만/)) return Math.round(parseFloat(m[1])*1e4); if(m=s.match(/([\d.]+)천/)) return Math.round(parseFloat(m[1])*1e3); return Math.round(parseFloat(s)||0); }
+function parseDl(s){ if(!s) return 0; s=String(s).replace(/,/g,""); let n=0,m; if(m=s.match(/([\d.]+)\s*억/)) n+=parseFloat(m[1])*1e8; if(m=s.match(/([\d.]+)\s*만/)) n+=parseFloat(m[1])*1e4; if(m=s.match(/([\d.]+)\s*천/)) n+=parseFloat(m[1])*1e3; if(!n) n=parseFloat(s)||0; return Math.round(n); }
 function wonFmt(n){ if(n==null) return "-"; if(n>=1e8) return (n/1e8).toFixed((n>=1e9)?0:1).replace(/\.0$/,"")+"억"; if(n>=1e4) return Math.round(n/1e4).toLocaleString()+"만"; return Math.round(n).toLocaleString()+"원"; }
 const normName = s => String(s||"").replace(/\s*\[[^\]]*\]\s*$/,"").replace(/\s+/g,"");
-let SNAMEIDX=null;
+let SNAMEIDX=null, modalSeq=0;
 function seriesNameIndex(){
   if(SNAMEIDX) return SNAMEIDX;
   const idx={}; if(SERIES){ const seen=new Set(); for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const c in (SERIES[kind]||{})[pf]||{}) for(const p in SERIES[kind][pf][c]) for(const it of SERIES[kind][pf][c][p]){ if(seen.has(it.id))continue; seen.add(it.id); const n=normName(it.t); (idx[n]||(idx[n]=[])).push({pn:it.id,kind}); } SNAMEIDX=idx; }
@@ -36,7 +36,7 @@ function revenueFor(name){
   const best=cands.map(c=>({...c,d:SERIESDET[c.pn]})).filter(x=>x.d&&x.d.dl&&x.d.ep).sort((a,b)=>(a.kind==="comic"?0:1)-(b.kind==="comic"?0:1))[0];
   if(!best) return null;
   const dl=parseDl(best.d.dl), ep=best.d.ep||1, base=dl*320*0.9*0.006;
-  return { full: base*ep, per: base, dl, ep, kind:best.kind };
+  return { full: base*ep, per: base, dl, dlStr:best.d.dl, star:best.d.star, cmt:best.d.cmt, ep, kind:best.kind };
 }
 
 const SOURCES = {
@@ -285,7 +285,7 @@ function ensureDetails(){ if(DETAILS) return Promise.resolve(DETAILS); if(!detai
 function ensureHistory(){ if(HISTORY) return Promise.resolve(HISTORY); if(!historyLoading) historyLoading=fetchJSON("data/history.json").then(h=>HISTORY=h).catch(()=>HISTORY={dates:[],series:{}}); return historyLoading; }
 function buildKwIndex(){ KWINDEX={}; for(const id in DETAILS){ for(const kw of (DETAILS[id].k||[])){ (KWINDEX[kw]||(KWINDEX[kw]=[])).push(Number(id)); } } }
 
-function detailHtml(det){
+function detailHtml(det, name){
   const info=[];
   if(det.g) info.push(["장르", det.g + (det.dailyplus?" · 매일+":"")]);
   if(det.cp) info.push(["제작사", det.cp==="다중"?"여러 제작사":det.cp]);
@@ -295,6 +295,8 @@ function detailHtml(det){
   if(det.cmt) info.push(["평균 댓글", det.cmt.toLocaleString()+"개"]);
   if(det.ep) info.push(["회차", det.ep+"화"]);
   if(det.fav) info.push(["관심", det.fav.toLocaleString()+"명"]);
+  const rv = name ? revenueFor(name) : null;
+  if(rv){ info.push(["시리즈 다운로드", rv.dlStr+" · "+rv.ep+"화("+(rv.kind==="comic"?"웹툰":"웹소설")+")"]); info.push(["시리즈 매출추정", "회차당 "+wonFmt(rv.per)+" · 총 "+wonFmt(rv.full)]); }
   let h="";
   if(info.length) h+=`<div class="mrows">`+info.map(([k,v])=>`<div class="mrow"><span class="mk">${k}</span><span class="mv">${esc(v)}</span></div>`).join("")+`</div>`;
   const kws=(det.k||[]).slice(); if(det.novel) kws.push("소설원작");
@@ -356,12 +358,19 @@ function openModal(d){
     ${webtoon?`<button class="mepbtn" data-id="${d.id}" data-name="${esc(d.name)}">⬇ 회차별 댓글·별점 엑셀(CSV)</button>`:""}
     <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
   document.getElementById("modal").hidden=false;
+  const myTok=++modalSeq;
   Promise.all([webtoon?ensureDetails():isSeries?ensureSeriesDetails():Promise.resolve(), ensureHistory()]).then(()=>{
+    if(modalSeq!==myTok) return;
     const el=document.getElementById("mdetail");
-    if(webtoon && el) el.innerHTML = (DETAILS[d.id]?detailHtml(DETAILS[d.id]):'<div class="mloading">상세 정보 없음</div>');
+    if(webtoon && el) el.innerHTML = (DETAILS[d.id]?detailHtml(DETAILS[d.id], d.name):'<div class="mloading">상세 정보 없음</div>');
     else if(isSeries && el) el.innerHTML = (SERIESDET&&SERIESDET[d.id])?seriesDetailHtml(SERIESDET[d.id]):'<div class="mloading">상세 수집 중 — 매일 추가됩니다</div>';
     const cx=document.getElementById("mcross"); if(cx) cx.innerHTML=crossBasisHtml(d, caps.series);
   });
+  // 웹툰: 연동된 시리즈 다운수는 SERIES(지연) 로드 후 상세에 주입 (초기 표시 안 막음)
+  if(webtoon){ Promise.all([ensureDetails(), ensureSeries(), ensureSeriesDetails()]).then(()=>{
+    if(modalSeq!==myTok) return; const el=document.getElementById("mdetail");
+    if(el && DETAILS[d.id]) el.innerHTML = detailHtml(DETAILS[d.id], d.name);
+  }); }
 }
 /* 키워드 클릭 → 그 키워드 작품 전부 */
 function openKeywordList(kw){
@@ -395,9 +404,11 @@ function openWorkModal(w){
     <div class="mdetail" id="mdetail"><div class="mloading">상세 불러오는 중…</div></div>
     <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
   document.getElementById("modal").hidden=false;
-  (isWt?ensureDetails():ensureSeriesDetails()).then(()=>{
+  const myTok=++modalSeq;
+  (isWt?Promise.all([ensureDetails(),ensureSeries(),ensureSeriesDetails()]):ensureSeriesDetails()).then(()=>{
+    if(modalSeq!==myTok) return;
     const el=document.getElementById("mdetail"); if(!el) return;
-    if(isWt) el.innerHTML = DETAILS[w.id]?detailHtml(DETAILS[w.id]):'<div class="mloading">상세 정보 없음</div>';
+    if(isWt) el.innerHTML = DETAILS[w.id]?detailHtml(DETAILS[w.id], w.name):'<div class="mloading">상세 정보 없음</div>';
     else el.innerHTML = (SERIESDET&&SERIESDET[w.id])?seriesDetailHtml(SERIESDET[w.id]):'<div class="mloading">상세 수집 중 — 매일 추가됩니다</div>';
   });
 }

@@ -158,15 +158,15 @@ async function collectSeriesDetails(seriesData, existing){
   const det = existing || {};
   const seen = new Set(), order = [];
   for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const cat in (seriesData[kind]||{})[pf]||{}) for(const p in seriesData[kind][pf][cat]) for(const it of seriesData[kind][pf][cat][p]){ if(!seen.has(it.id)){ seen.add(it.id); order.push([it.id, kind]); } }
-  const CAP = 300; let done = 0;
+  // 매일 전체 재수집(갱신) — 다운수가 새벽 4시(KST)에 바뀌므로. 실패/빈응답이면 기존값 유지.
+  const CAP = 2500; let done = 0, refreshed = 0;
   for(const [id, kind] of order){
-    if(det[id]) continue;          // 증분: 이미 있으면 skip
     if(done >= CAP) break;
-    try{ const h = await getText(`https://series.naver.com/${kind}/detail.series?productNo=${id}`, UA_PC, "https://series.naver.com/"); det[id] = parseSeriesDetail(h); det[id].kind = kind; }
-    catch(e){ /* skip */ }
-    done++; await sleep(120);
+    try{ const h = await getText(`https://series.naver.com/${kind}/detail.series?productNo=${id}`, UA_PC, "https://series.naver.com/"); const pd = parseSeriesDetail(h); pd.kind = kind; if(pd.dl||pd.g||pd.ep||pd.syn){ det[id] = pd; refreshed++; } else if(!det[id]){ det[id] = pd; } }
+    catch(e){ /* 기존값 유지 */ }
+    done++; await sleep(80);
   }
-  console.log("series details:", done, "신규 수집 / 총", Object.keys(det).length, "/", order.length);
+  console.log("series details:", refreshed, "갱신 / 시도", done, "/ 대상", order.length, "/ 총", Object.keys(det).length);
   return det;
 }
 
