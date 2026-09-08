@@ -18,10 +18,29 @@ const F_MOVE=[["all","전체"],["up","상승"],["down","하락"]];
 const F_APP=[["all","전체"],["up","상승"],["down","하락"],["new","신작·진입"],["streak","연속기록"],["rest","휴재"]];
 const F_MIN=[["all","전체"]];
 const S_MOVE=[["rank","순위순"],["up","상승폭"],["down","하락폭"]];
+const S_APP=[["rank","순위순"],["up","상승폭"],["down","하락폭"],["revenue","시리즈 매출추정순"]];
 const dot = d => (d||"").replace(/-/g,".");
+/* 시리즈 매출 추정: 시리즈 다운로드수(문자열)→숫자, 매출=다운수×320×0.9×0.6%(×회차수) */
+function parseDl(s){ if(!s) return 0; s=String(s).replace(/,/g,""); let m; if(m=s.match(/([\d.]+)억/)) return Math.round(parseFloat(m[1])*1e8); if(m=s.match(/([\d.]+)만/)) return Math.round(parseFloat(m[1])*1e4); if(m=s.match(/([\d.]+)천/)) return Math.round(parseFloat(m[1])*1e3); return Math.round(parseFloat(s)||0); }
+function wonFmt(n){ if(n==null) return "-"; if(n>=1e8) return (n/1e8).toFixed((n>=1e9)?0:1).replace(/\.0$/,"")+"억"; if(n>=1e4) return Math.round(n/1e4).toLocaleString()+"만"; return Math.round(n).toLocaleString()+"원"; }
+const normName = s => String(s||"").replace(/\s*\[[^\]]*\]\s*$/,"").replace(/\s+/g,"");
+let SNAMEIDX=null;
+function seriesNameIndex(){
+  if(SNAMEIDX) return SNAMEIDX;
+  const idx={}; if(SERIES){ const seen=new Set(); for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const c in (SERIES[kind]||{})[pf]||{}) for(const p in SERIES[kind][pf][c]) for(const it of SERIES[kind][pf][c][p]){ if(seen.has(it.id))continue; seen.add(it.id); const n=normName(it.t); (idx[n]||(idx[n]=[])).push({pn:it.id,kind}); } SNAMEIDX=idx; }
+  return idx;
+}
+function revenueFor(name){
+  if(!SERIES||!SERIESDET) return null;
+  const cands=seriesNameIndex()[normName(name)]; if(!cands||!cands.length) return null;
+  const best=cands.map(c=>({...c,d:SERIESDET[c.pn]})).filter(x=>x.d&&x.d.dl&&x.d.ep).sort((a,b)=>(a.kind==="comic"?0:1)-(b.kind==="comic"?0:1))[0];
+  if(!best) return null;
+  const dl=parseDl(best.d.dl), ep=best.d.ep||1, base=dl*320*0.9*0.006;
+  return { full: base*ep, per: base, dl, ep, kind:best.kind };
+}
 
 const SOURCES = {
-  app:     { label:"앱 주간", variants:null, subs:()=>["전체","여성","남성"].map(k=>[k,String((APP&&APP.charts&&APP.charts[k]||[]).length)]), data:(v,s)=>APP&&APP.charts[s], caps:{move:1,streak:1,badge:1,tiles:1,gap:1}, filters:F_APP, sorts:S_MOVE, note:()=>`${weekLabel(APP.date)} · 앱 「이번 주 웹툰 랭킹」` },
+  app:     { label:"앱 주간", variants:null, subs:()=>["전체","여성","남성"].map(k=>[k,String((APP&&APP.charts&&APP.charts[k]||[]).length)]), data:(v,s)=>APP&&APP.charts[s], caps:{move:1,streak:1,badge:1,tiles:1,gap:1}, filters:F_APP, sorts:S_APP, note:()=>`${weekLabel(APP.date)} · 앱 「이번 주 웹툰 랭킹」` },
   weekday: { label:"요일별", variants:[["app","모바일"],["web","웹"]], subs:()=>WEEKDAYS, data:(v,s)=>WEEKDAY&&WEEKDAY[v]&&WEEKDAY[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(WEEKDAY.date)} · 요일별 인기순 · ${v==="app"?"모바일":"웹(PC)"} · 자동` },
   genre:   { label:"장르", variants:[["app","모바일"],["web","웹"]], subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE[v]&&GENRE[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(GENRE.date)} · 장르별 인기순 · ${v==="app"?"모바일":"웹(PC)"} · 자동` },
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][platform]&&SERIES[v][platform][scat]&&SERIES[v][platform][scat][s], caps:{move:1,tiles:1,series:1,badge:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · ${platform==="web"?"웹(PC)":"모바일"} · ${scat} · 자동` },
@@ -165,7 +184,9 @@ function renderControls(){
   fEl.innerHTML=SOURCES[src].filters.map(([k,l])=>`<button class="chip" data-f="${k}" aria-pressed="${k===fMode}">${l}</button>`).join("");
   sEl.innerHTML=SOURCES[src].sorts.map(([k,l])=>`<button class="chip" data-s="${k}" aria-pressed="${k===sMode}">${l}</button>`).join("");
   fEl.onclick=e=>{ const b=e.target.closest("[data-f]"); if(!b)return; fMode=b.dataset.f; [...fEl.children].forEach(c=>c.setAttribute("aria-pressed",c===b)); renderList(); };
-  sEl.onclick=e=>{ const b=e.target.closest("[data-s]"); if(!b)return; sMode=b.dataset.s; [...sEl.children].forEach(c=>c.setAttribute("aria-pressed",c===b)); renderList(); };
+  sEl.onclick=e=>{ const b=e.target.closest("[data-s]"); if(!b)return; sMode=b.dataset.s; [...sEl.children].forEach(c=>c.setAttribute("aria-pressed",c===b));
+    if(sMode==="revenue" && (!SERIES||!SERIESDET)){ document.getElementById("board").innerHTML=`<li class="empty">시리즈 매출 데이터 불러오는 중…</li>`; Promise.all([ensureSeries(),ensureSeriesDetails()]).then(()=>{ SNAMEIDX=null; renderList(); }); return; }
+    renderList(); };
 }
 document.getElementById("q").addEventListener("input", e=>{ query=e.target.value.trim().toLowerCase(); renderList(); });
 
@@ -233,20 +254,26 @@ function renderList(){
   });
   if(sMode==="up") rows=[...rows].sort((a,b)=>b.m-a.m);
   else if(sMode==="down") rows=[...rows].sort((a,b)=>a.m-b.m);
+  else if(sMode==="revenue") rows=[...rows].sort((a,b)=>{ const ra=revenueFor(a.name),rb=revenueFor(b.name); return (rb?rb.full:-1)-(ra?ra.full:-1); });
   else rows=[...rows].sort((a,b)=>a.r-b.r);
   rowsCache=rows;
   const countEl=document.getElementById("count"), board=document.getElementById("board");
   const total=(SOURCES[src].data(variant,sub)||[]).length;
-  countEl.textContent=`${rows.length}개 작품`+(fMode!=="all"||query?` (${subLabel(sub)} ${total}개 중)`:"");
+  countEl.innerHTML=`${rows.length}개 작품`+(fMode!=="all"||query?` (${subLabel(sub)} ${total}개 중)`:"")+(sMode==="revenue"?` · <span style="color:var(--faint)">시리즈 매출추정 = 다운수×320×0.9×0.6%×회차수 · ÷회차=회차당</span>`:"");
   if(!rows.length){ board.innerHTML=`<li class="empty">조건에 맞는 작품이 없어요.</li>`; return; }
   board.innerHTML=rows.map((d,i)=>{
     const thumb=d.th?`<img class="thumb" loading="lazy" src="${esc(d.th)}" alt="">`:`<div class="thumb ph">🎬</div>`;
     return `<li class="rowli ${d.r<=3?"top"+d.r:""}" role="button" tabindex="0" data-i="${i}">
       <div class="rk tnum">${d.r}</div>${thumb}
       <div class="cell"><div class="ttl"><span class="name">${esc(d.name)}</span>${badgeHtml(d)}</div><div class="auth">${esc(d.a)}</div></div>
-      ${caps.move?moveHtml(d.m):""}
+      ${sMode==="revenue" ? revHtml(d) : (caps.move?moveHtml(d.m):"")}
     </li>`;
   }).join("");
+}
+function revHtml(d){
+  const r=revenueFor(d.name);
+  if(!r) return `<div class="rev rev-none">시리즈<br>없음</div>`;
+  return `<div class="rev" title="시리즈 다운 ${r.dl.toLocaleString()} · ${r.ep}화 (${r.kind==="comic"?"웹툰":"웹소설"})"><span class="rev-full">${wonFmt(r.full)}</span><span class="rev-per">÷회차 ${wonFmt(r.per)}</span></div>`;
 }
 
 const searchUrl = t => `https://search.naver.com/search.naver?query=${encodeURIComponent(t+" 웹툰")}`;
