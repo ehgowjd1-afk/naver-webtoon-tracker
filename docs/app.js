@@ -22,7 +22,7 @@ const S_APP=[["rank","순위순"],["up","상승폭"],["down","하락폭"],["reve
 const dot = d => (d||"").replace(/-/g,".");
 /* 시리즈 매출 추정: 시리즈 다운로드수(문자열)→숫자, 매출=다운수×320×0.9×0.6%(×회차수) */
 function parseDl(s){ if(!s) return 0; s=String(s).replace(/,/g,""); let n=0,m; if(m=s.match(/([\d.]+)\s*억/)) n+=parseFloat(m[1])*1e8; if(m=s.match(/([\d.]+)\s*만/)) n+=parseFloat(m[1])*1e4; if(m=s.match(/([\d.]+)\s*천/)) n+=parseFloat(m[1])*1e3; if(!n) n=parseFloat(s)||0; return Math.round(n); }
-function wonFmt(n){ if(n==null) return "-"; if(n>=1e8) return (n/1e8).toFixed((n>=1e9)?0:1).replace(/\.0$/,"")+"억"; if(n>=1e4) return Math.round(n/1e4).toLocaleString()+"만"; return Math.round(n).toLocaleString()+"원"; }
+function wonFmt(n){ if(n==null) return "-"; n=Math.round(n); if(n===0) return "0원"; const eok=Math.floor(n/1e8), man=Math.floor((n%1e8)/1e4), rest=n%1e4; const p=[]; if(eok) p.push(eok.toLocaleString()+"억"); if(man) p.push(man.toLocaleString()+"만"); if(rest||!p.length) p.push(rest.toLocaleString()); return p.join(" ")+"원"; }
 const normName = s => String(s||"").replace(/\s*\[[^\]]*\]\s*$/,"").replace(/\s+/g,"");
 let SNAMEIDX=null, modalSeq=0;
 function seriesNameIndex(){
