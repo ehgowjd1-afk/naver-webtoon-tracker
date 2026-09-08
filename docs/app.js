@@ -30,13 +30,13 @@ function seriesNameIndex(){
   const idx={}; if(SERIES){ const seen=new Set(); for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const c in (SERIES[kind]||{})[pf]||{}) for(const p in SERIES[kind][pf][c]) for(const it of SERIES[kind][pf][c][p]){ if(seen.has(it.id))continue; seen.add(it.id); const n=normName(it.t); (idx[n]||(idx[n]=[])).push({pn:it.id,kind}); } SNAMEIDX=idx; }
   return idx;
 }
-function revenueFor(name){
+function revenueFor(name, epOverride){
   if(!SERIES||!SERIESDET) return null;
   const cands=seriesNameIndex()[normName(name)]; if(!cands||!cands.length) return null;
   const best=cands.map(c=>({...c,d:SERIESDET[c.pn]})).filter(x=>x.d&&x.d.dl&&x.d.ep).sort((a,b)=>(a.kind==="comic"?0:1)-(b.kind==="comic"?0:1))[0];
   if(!best) return null;
-  const dl=parseDl(best.d.dl), ep=best.d.ep||1, base=dl*320*0.9*0.006;
-  return { full: base*ep, per: base, dl, dlStr:best.d.dl, star:best.d.star, cmt:best.d.cmt, ep, kind:best.kind };
+  const dl=parseDl(best.d.dl), ep=(epOverride>0?epOverride:(best.d.ep||1)), total=dl*320*0.9*0.6;   // 총매출 = 다운수×320×0.9×0.6
+  return { full: total, per: total/ep, dl, dlStr:best.d.dl, star:best.d.star, cmt:best.d.cmt, ep, sep:best.d.ep, kind:best.kind };  // per(회차당)=총÷회차수(작품 회차수 우선)
 }
 
 const SOURCES = {
@@ -259,7 +259,7 @@ function renderList(){
   rowsCache=rows;
   const countEl=document.getElementById("count"), board=document.getElementById("board");
   const total=(SOURCES[src].data(variant,sub)||[]).length;
-  countEl.innerHTML=`${rows.length}개 작품`+(fMode!=="all"||query?` (${subLabel(sub)} ${total}개 중)`:"")+(sMode==="revenue"?` · <span style="color:var(--faint)">회차당 매출추정 = 시리즈다운수×320×0.9×0.6% (정렬기준) · 총 = ×회차수</span>`:"");
+  countEl.innerHTML=`${rows.length}개 작품`+(fMode!=="all"||query?` (${subLabel(sub)} ${total}개 중)`:"")+(sMode==="revenue"?` · <span style="color:var(--faint)">회차당 매출추정 = 시리즈다운수×320×0.9×0.6÷회차수 (정렬기준) · 총 = 다운수×320×0.9×0.6</span>`:"");
   if(!rows.length){ board.innerHTML=`<li class="empty">조건에 맞는 작품이 없어요.</li>`; return; }
   board.innerHTML=rows.map((d,i)=>{
     const thumb=d.th?`<img class="thumb" loading="lazy" src="${esc(d.th)}" alt="">`:`<div class="thumb ph">🎬</div>`;
@@ -273,7 +273,7 @@ function renderList(){
 function revHtml(d){
   const r=revenueFor(d.name);
   if(!r) return `<div class="rev rev-none">시리즈<br>없음</div>`;
-  return `<div class="rev" title="시리즈 다운 ${r.dl.toLocaleString()} · ${r.ep}화 (${r.kind==="comic"?"웹툰":"웹소설"})"><span class="rev-full">${wonFmt(r.per)}</span><span class="rev-per">총 ${wonFmt(r.full)}</span></div>`;
+  return `<div class="rev" title="시리즈 다운 ${r.dl.toLocaleString()} ÷ ${r.ep}화 (${r.kind==="comic"?"웹툰":"웹소설"})"><span class="rev-full">${wonFmt(r.per)}</span><span class="rev-per">총 ${wonFmt(r.full)}</span></div>`;
 }
 
 const searchUrl = t => `https://search.naver.com/search.naver?query=${encodeURIComponent(t+" 웹툰")}`;

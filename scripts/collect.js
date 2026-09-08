@@ -201,6 +201,17 @@ async function collectDetails(existing){
     }));
     await sleep(50);
   }
+  // 기존 작품 회차수(ep) 매일 갱신 — article/list totalCount. (회차·댓글평균 정확도) 장르/키워드/제작사는 잘 안 바뀌어 유지.
+  const todoSet = new Set(todo);
+  const refresh = ids.filter(id => details[id] && !todoSet.has(id));
+  let rf = 0;
+  for(let i=0;i<refresh.length;i+=CONC){
+    await Promise.all(refresh.slice(i,i+CONC).map(async id=>{
+      try{ const al = await getJSON(`https://comic.naver.com/api/article/list?titleId=${id}&page=1&sort=ASC`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(al.totalCount){ details[id].ep = al.totalCount; rf++; } if(!details[id].launch){ const first=(al.articleList||[])[0]; if(first) details[id].launch=first.serviceDateDescription||""; } }catch(e){}
+    }));
+    await sleep(50);
+  }
+  console.log("details ep 갱신:", rf, "/", refresh.length);
   return details;
 }
 
