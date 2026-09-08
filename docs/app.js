@@ -254,12 +254,12 @@ function renderList(){
   });
   if(sMode==="up") rows=[...rows].sort((a,b)=>b.m-a.m);
   else if(sMode==="down") rows=[...rows].sort((a,b)=>a.m-b.m);
-  else if(sMode==="revenue") rows=[...rows].sort((a,b)=>{ const ra=revenueFor(a.name),rb=revenueFor(b.name); return (rb?rb.full:-1)-(ra?ra.full:-1); });
+  else if(sMode==="revenue") rows=[...rows].sort((a,b)=>{ const ra=revenueFor(a.name),rb=revenueFor(b.name); return (rb?rb.per:-1)-(ra?ra.per:-1); });
   else rows=[...rows].sort((a,b)=>a.r-b.r);
   rowsCache=rows;
   const countEl=document.getElementById("count"), board=document.getElementById("board");
   const total=(SOURCES[src].data(variant,sub)||[]).length;
-  countEl.innerHTML=`${rows.length}개 작품`+(fMode!=="all"||query?` (${subLabel(sub)} ${total}개 중)`:"")+(sMode==="revenue"?` · <span style="color:var(--faint)">시리즈 매출추정 = 다운수×320×0.9×0.6%×회차수 · ÷회차=회차당</span>`:"");
+  countEl.innerHTML=`${rows.length}개 작품`+(fMode!=="all"||query?` (${subLabel(sub)} ${total}개 중)`:"")+(sMode==="revenue"?` · <span style="color:var(--faint)">회차당 매출추정 = 시리즈다운수×320×0.9×0.6% (정렬기준) · 총 = ×회차수</span>`:"");
   if(!rows.length){ board.innerHTML=`<li class="empty">조건에 맞는 작품이 없어요.</li>`; return; }
   board.innerHTML=rows.map((d,i)=>{
     const thumb=d.th?`<img class="thumb" loading="lazy" src="${esc(d.th)}" alt="">`:`<div class="thumb ph">🎬</div>`;
@@ -273,7 +273,7 @@ function renderList(){
 function revHtml(d){
   const r=revenueFor(d.name);
   if(!r) return `<div class="rev rev-none">시리즈<br>없음</div>`;
-  return `<div class="rev" title="시리즈 다운 ${r.dl.toLocaleString()} · ${r.ep}화 (${r.kind==="comic"?"웹툰":"웹소설"})"><span class="rev-full">${wonFmt(r.full)}</span><span class="rev-per">÷회차 ${wonFmt(r.per)}</span></div>`;
+  return `<div class="rev" title="시리즈 다운 ${r.dl.toLocaleString()} · ${r.ep}화 (${r.kind==="comic"?"웹툰":"웹소설"})"><span class="rev-full">${wonFmt(r.per)}</span><span class="rev-per">총 ${wonFmt(r.full)}</span></div>`;
 }
 
 const searchUrl = t => `https://search.naver.com/search.naver?query=${encodeURIComponent(t+" 웹툰")}`;
