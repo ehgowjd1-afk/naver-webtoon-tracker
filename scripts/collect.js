@@ -309,8 +309,26 @@ function updateHistory(hist, date, todayBases){
 }
 
 function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(0,10); }
+function parseDlNum(s){ if(!s) return 0; s=String(s).replace(/,/g,""); let n=0,m; if(m=s.match(/([\d.]+)\s*억/)) n+=parseFloat(m[1])*1e8; if(m=s.match(/([\d.]+)\s*만/)) n+=parseFloat(m[1])*1e4; if(m=s.match(/([\d.]+)\s*천/)) n+=parseFloat(m[1])*1e3; if(!n) n=parseFloat(s)||0; return Math.round(n); }
+// 매출 누적 히스토리: 시리즈 productNo 기준 dl(다운수)+ep(회차수)만 저장 → 총매출/회차당은 클라에서 계산
+function updateRevenueHistory(dir, date){
+  let sd={}; try{ sd=JSON.parse(fs.readFileSync(path.join(dir,"series_details.json"),"utf8")); }catch(e){ return null; }
+  let rh={dates:[],works:{}}; try{ rh=JSON.parse(fs.readFileSync(path.join(dir,"revenue_history.json"),"utf8")); }catch(e){}
+  if(!rh.dates) rh.dates=[]; if(!rh.works) rh.works={};
+  if(!rh.dates.includes(date)) rh.dates.push(date);
+  const di=rh.dates.indexOf(date);
+  for(const pn in sd){ const d=sd[pn], dl=parseDlNum(d.dl), ep=d.ep; if(!dl||!ep) continue;
+    const w=rh.works[pn]||(rh.works[pn]={dl:[],ep:[]});
+    while(w.dl.length<di){ w.dl.push(null); w.ep.push(null); }
+    w.dl[di]=dl; w.ep[di]=ep;
+  }
+  for(const pn in rh.works){ const w=rh.works[pn]; while(w.dl.length<=di){ w.dl.push(null); w.ep.push(null); } }
+  const RMAX=150; if(rh.dates.length>RMAX){ const cut=rh.dates.length-RMAX; rh.dates.splice(0,cut); for(const pn in rh.works){ rh.works[pn].dl.splice(0,cut); rh.works[pn].ep.splice(0,cut); } }
+  fs.writeFileSync(path.join(dir,"revenue_history.json"), JSON.stringify(rh));
+  return { dates:rh.dates.length, works:Object.keys(rh.works).length };
+}
 
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, parseDlNum, updateRevenueHistory, isoDate };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();
   console.log("collecting", date, "…");
@@ -334,6 +352,7 @@ if (require.main === module) (async ()=>{
   fs.writeFileSync(path.join(OUT,"series.json"), JSON.stringify({ updated, date, comic:s_comic, novel:s_novel }));
   try { const promo = await collectPromo(); fs.writeFileSync(path.join(OUT,"promo.json"), JSON.stringify({ updated, date, comic:promo.comic, novel:promo.novel })); } catch(e){ console.error("promo failed:", e.message); }
   try { let sd={}; try{ sd=JSON.parse(fs.readFileSync(path.join(OUT,"series_details.json"),"utf8")); }catch(e){} sd=await collectSeriesDetails({comic:s_comic, novel:s_novel}, sd); fs.writeFileSync(path.join(OUT,"series_details.json"), JSON.stringify(sd)); } catch(e){ console.error("series details failed:", e.message); }
+  try { const rh = updateRevenueHistory(OUT, date); if(rh) console.log("revenue history:", JSON.stringify(rh)); } catch(e){ console.error("revenue history failed:", e.message); }
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
   fs.writeFileSync(path.join(OUT,"details.json"), JSON.stringify(details));
   fs.writeFileSync(path.join(OUT,"history.json"), JSON.stringify(hist));
