@@ -162,7 +162,9 @@ async function collectSeriesDetails(seriesData, existing){
   const CAP = 2500; let done = 0, refreshed = 0;
   for(const [id, kind] of order){
     if(done >= CAP) break;
-    try{ const h = await getText(`https://series.naver.com/${kind}/detail.series?productNo=${id}`, UA_PC, "https://series.naver.com/"); const pd = parseSeriesDetail(h); pd.kind = kind; if(pd.dl||pd.g||pd.ep||pd.syn){ det[id] = pd; refreshed++; } else if(!det[id]){ det[id] = pd; } }
+    try{ const h = await getText(`https://series.naver.com/${kind}/detail.series?productNo=${id}`, UA_PC, "https://series.naver.com/"); const pd = parseSeriesDetail(h); pd.kind = kind;
+      if(pd.dl||pd.g||pd.ep||pd.syn){ det[id] = mergeDetail(det[id], pd, kind); refreshed++; }   // 로그아웃 재수집이 19금/검색작의 기존 dl을 지우지 않도록 병합(빈값이면 기존 유지)
+      else if(!det[id]){ det[id] = pd; } }
     catch(e){ /* 기존값 유지 */ }
     done++; await sleep(80);
   }
@@ -328,7 +330,15 @@ function updateRevenueHistory(dir, date){
   return { dates:rh.dates.length, works:Object.keys(rh.works).length };
 }
 
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, parseDlNum, updateRevenueHistory, isoDate };
+// 재수집 병합: 빈값이면 기존 유지(로그아웃이 19금/검색작 dl 안 지움)
+function mergeDetail(old, pd, kind){ old=old||{}; return { g:pd.g||old.g||"", k:(pd.k&&pd.k.length)?pd.k:(old.k||[]), dl:pd.dl||old.dl||"", star:pd.star||old.star||"", cmt:pd.cmt||old.cmt||"", ep:pd.ep||old.ep||0, status:pd.status||old.status||"", syn:pd.syn||old.syn||"", kind:kind||pd.kind||old.kind }; }
+// 시리즈 통합검색 결과 파싱 → [{pn, kind, title}]
+function parseSeriesSearch(html){
+  const out=[], re=/<a href="\/(comic|novel)\/detail\.series\?productNo=(\d+)" class="N=a:(?:com|nov)\.title">([\s\S]*?)<\/a>/g;
+  let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
+  return out;
+}
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, parseDlNum, updateRevenueHistory, isoDate, mergeDetail, parseSeriesSearch };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();
   console.log("collecting", date, "…");

@@ -11,7 +11,7 @@ let APP=null, WEEKDAY=null, GENRE=null, SERIES=null, PROMO=null, LOOKUP={id:{},n
 let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="";
 let rowsCache=[];
 let DETAILS=null, detailsLoading=null, HISTORY=null, historyLoading=null, KWINDEX=null, seriesLoading=null, promoLoading=null;
-let SERIESDET=null, seriesDetLoading=null, REVHIST=null, revHistLoading=null;
+let SERIESDET=null, seriesDetLoading=null, REVHIST=null, revHistLoading=null, SERIESEXTRA=null;
 const DAILYPLUS=new Set();
 
 const F_MOVE=[["all","전체"],["up","상승"],["down","하락"]];
@@ -27,7 +27,9 @@ const normName = s => String(s||"").replace(/\s*\[[^\]]*\]\s*$/,"").replace(/\s+
 let SNAMEIDX=null, modalSeq=0;
 function seriesNameIndex(){
   if(SNAMEIDX) return SNAMEIDX;
-  const idx={}; if(SERIES){ const seen=new Set(); for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const c in (SERIES[kind]||{})[pf]||{}) for(const p in SERIES[kind][pf][c]) for(const it of SERIES[kind][pf][c][p]){ if(seen.has(it.id))continue; seen.add(it.id); const n=normName(it.t); (idx[n]||(idx[n]=[])).push({pn:it.id,kind}); } SNAMEIDX=idx; }
+  const idx={}; if(SERIES){ const seen=new Set(); for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const c in (SERIES[kind]||{})[pf]||{}) for(const p in SERIES[kind][pf][c]) for(const it of SERIES[kind][pf][c][p]){ if(seen.has(it.id))continue; seen.add(it.id); const n=normName(it.t); (idx[n]||(idx[n]=[])).push({pn:it.id,kind}); } }
+  if(SERIESEXTRA&&SERIESEXTRA.map){ for(const n in SERIESEXTRA.map) for(const e of SERIESEXTRA.map[n]){ const a=(idx[n]||(idx[n]=[])); if(!a.some(x=>x.pn===e.pn)) a.push({pn:e.pn,kind:e.kind}); } }  // 검색으로 찾은 시리즈(랭킹에 없는 작품) 연동
+  if(SERIES||SERIESEXTRA) SNAMEIDX=idx;
   return idx;
 }
 function revenueFor(name, epOverride){
@@ -96,7 +98,10 @@ async function boot(){
 function fail(){ document.getElementById("board").innerHTML=`<li class="empty">데이터를 불러오지 못했어요. 새로고침 해주세요.</li>`; }
 function ensureSeries(){ if(SERIES) return Promise.resolve(); if(!seriesLoading) seriesLoading=fetchJSON("data/series.json").then(d=>{SERIES=d;}).catch(()=>{SERIES={date:"",comic:{},novel:{}};}); return seriesLoading; }
 function ensurePromo(){ if(PROMO) return Promise.resolve(); if(!promoLoading) promoLoading=fetchJSON("data/promo.json").then(d=>{PROMO=d;}).catch(()=>{PROMO={date:"",comic:{},novel:{}};}); return promoLoading; }
-function ensureSeriesDetails(){ if(SERIESDET) return Promise.resolve(); if(!seriesDetLoading) seriesDetLoading=fetchJSON("data/series_details.json").then(d=>{SERIESDET=d;}).catch(()=>{SERIESDET={};}); return seriesDetLoading; }
+function ensureSeriesDetails(){ if(SERIESDET) return Promise.resolve(); if(!seriesDetLoading) seriesDetLoading=Promise.all([
+    fetchJSON("data/series_details.json").then(d=>{SERIESDET=d;}).catch(()=>{SERIESDET={};}),
+    fetchJSON("data/series_extra.json").then(d=>{SERIESEXTRA=d;}).catch(()=>{SERIESEXTRA={map:{}};})
+  ]).then(()=>{ SNAMEIDX=null; }); return seriesDetLoading; }
 function ensureRevHist(){ if(REVHIST) return Promise.resolve(); if(!revHistLoading) revHistLoading=fetchJSON("data/revenue_history.json").then(d=>{REVHIST=d;}).catch(()=>{REVHIST={dates:[],works:{}};}); return revHistLoading; }
 /* 특정 작품(이름)의 매출 누적 시계열: revenueFor로 시리즈 pn 찾고 REVHIST에서 dl/ep → 총매출/회차당 계산 */
 function revSeriesFor(name){
