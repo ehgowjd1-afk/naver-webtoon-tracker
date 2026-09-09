@@ -366,10 +366,10 @@ function detailHtml(det, name){
   const publish=[det.day,det.age].filter(Boolean).join(" · "); if(publish) info.push(["연재", publish]);
   if(det.star) info.push(["평균 별점", "★ "+det.star]);
   if(det.cmt) info.push(["평균 댓글", det.cmt.toLocaleString()+"개"]);
-  if(det.ep) info.push(["회차", det.ep+"화"]);
+  if(det.ep) info.push(["회차(총 N화)", det.ep+"화"]);
   if(det.fav) info.push(["관심", det.fav.toLocaleString()+"명"]);
   const rv = name ? revenueFor(name, det.ep) : null;
-  if(rv){ info.push(["시리즈 다운로드", rv.dlStr+" ("+(rv.kind==="comic"?"웹툰":"웹소설")+")"]); if(det.ep) info.push(["회차수(총 N화)", det.ep+"화"]); info.push(["매출 추정", "회차당 "+wonFmt(rv.per)+" · 총 "+wonFmt(rv.full)]); }
+  if(rv){ info.push(["시리즈 다운로드", rv.dlStr+" ("+(rv.kind==="comic"?"웹툰":"웹소설")+")"]); info.push(["매출 추정", "회차당 "+wonFmt(rv.per)+" · 총 "+wonFmt(rv.full)]); }
   let h="";
   if(info.length) h+=`<div class="mrows">`+info.map(([k,v])=>`<div class="mrow"><span class="mk">${k}</span><span class="mv">${esc(v)}</span></div>`).join("")+`</div>`;
   const kws=(det.k||[]).slice(); if(det.novel) kws.push("소설원작");
