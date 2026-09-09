@@ -211,9 +211,10 @@ async function collectDetails(existing){
     await Promise.all(refresh.slice(i,i+CONC).map(async id=>{
       try{
         const al = await getJSON(`https://comic.naver.com/api/article/list?titleId=${id}&page=1&sort=ASC`, `https://comic.naver.com/webtoon/list?titleId=${id}`);
+        details[id].adult = false;   // article/list 열림 = 비성인
         if(al.totalCount){ details[id].ep = al.totalCount; rf++; if(!details[id].launch){ const first=(al.articleList||[])[0]; if(first) details[id].launch=first.serviceDateDescription||""; } }
-        else { const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }   // 성인/차단 웹툰: 댓글API로 회차수
-      }catch(e){ try{ const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }catch(_){} }
+        else { details[id].adult = true; const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }
+      }catch(e){ if(/ 40\d/.test(e.message)){ details[id].adult = true; try{ const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }catch(_){} } }   // 401/403 = 성인/차단 웹툰(comic.naver 로그아웃 목록차단) → 성인 플래그 + 댓글API 회차수
     }));
     await sleep(50);
   }
