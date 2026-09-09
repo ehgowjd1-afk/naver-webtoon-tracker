@@ -1,0 +1,9 @@
+{
+  "name": "naver-webtoon-tracker",
+  "private": true,
+  "version": "1.0.0",
+  "description": "네이버웹툰·시리즈 랭킹 트래커 수집 스크립트",
+  "dependencies": {
+    "playwright-core": "^1.63.0"
+  }
+}

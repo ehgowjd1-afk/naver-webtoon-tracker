@@ -4,3 +4,5 @@ scripts/naver_cookie.txt
 naver_cookie.txt
 .env
 scripts/*.log
+scripts/.pw-profile/
+package-lock.json
