@@ -45,15 +45,16 @@ function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^
   const sd     = readJSON("series_details.json", {});
   const lookup = readJSON("lookup.json", { id: {}, name: {} });
   const extra  = readJSON("series_extra.json", { updated: "", searched: [], map: {}, owned: [] });
-  extra.searched = extra.searched || []; extra.map = extra.map || {}; extra.owned = extra.owned || [];
-  const searchedSet = new Set(extra.searched), ownedSet = new Set(extra.owned);
+  extra.map = extra.map || {}; extra.owned = extra.owned || [];
+  const ownedSet = new Set(extra.owned);
+  delete extra.searched; delete extra.searchedAt;   // 더 이상 안 씀: 연결 안 된 작품은 '연결될 때까지' 매일 전부 재검색
 
   // 랭킹작 normName -> [{pn,kind}]
   const idx = {};
   for (const kind of ["comic", "novel"]) for (const pf of ["web", "mobile"]) for (const c in (series[kind] || {})[pf] || {}) for (const p in series[kind][pf][c]) for (const it of series[kind][pf][c][p]) { const n = normName(it.t); (idx[n] || (idx[n] = [])).push({ pn: it.id, kind }); }
   const resolves = n => (idx[n] || []).some(x => sd[x.pn] && sd[x.pn].dl && sd[x.pn].ep) || (extra.map[n] || []).some(x => sd[x.pn] && sd[x.pn].dl && sd[x.pn].ep);
 
-  function flush() { extra.searched = [...searchedSet]; extra.owned = [...ownedSet]; extra.updated = new Date().toISOString(); fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd)); fs.writeFileSync(path.join(D, "series_extra.json"), JSON.stringify(extra)); }
+  function flush() { extra.owned = [...ownedSet]; extra.updated = new Date().toISOString(); fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd)); fs.writeFileSync(path.join(D, "series_extra.json"), JSON.stringify(extra)); }
   async function scrapeDetail(pn, kind) { try { const h = await getText(`https://series.naver.com/${kind}/detail.series?productNo=${pn}`); const pd = C.parseSeriesDetail(h); pd.kind = kind; if (pd.dl || pd.g || pd.ep || pd.syn) { sd[pn] = C.mergeDetail(sd[pn], pd, kind); return pd; } } catch (e) {} return null; }
 
   // (1) 시리즈 없음 웹툰 → 통합검색 연동
@@ -62,15 +63,13 @@ function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^
   for (const w of wt) {
     if (searched >= MAXNEW) break;
     const key = normName(w.name);
-    if (searchedSet.has(key)) continue;
-    if (resolves(key)) { searchedSet.add(key); continue; }
+    if (resolves(key)) continue;   // 이미 시리즈 연결됨(dl 있음) → 스킵. 안 된 건 매일 계속 재검색(연결될 때까지)
     searched++;
     try {
       const h = await getText(`https://series.naver.com/search/search.series?t=all&q=${encodeURIComponent(w.name)}`);
       const res = C.parseSeriesSearch(h);
       const nm = normMatch(w.name);
       const hit = res.find(r => r.kind === "comic" && normMatch(r.title) === nm) || res.find(r => r.kind === "novel" && normMatch(r.title) === nm);
-      searchedSet.add(key);
       if (hit) {
         const pd = await scrapeDetail(hit.pn, hit.kind);
         const a = extra.map[key] || (extra.map[key] = []);
@@ -99,7 +98,7 @@ function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^
 
   flush();
   const rh = C.updateRevenueHistory(D, C.isoDate());
-  console.log(`저장 완료 · 매출히스토리 ${JSON.stringify(rh)} · 연동맵 ${Object.keys(extra.map).length}작품 · owned ${extra.owned.length} · searched ${extra.searched.length} · ${((Date.now() - t0) / 1000).toFixed(0)}s`);
+  console.log(`저장 완료 · 매출히스토리 ${JSON.stringify(rh)} · 연동맵 ${Object.keys(extra.map).length}작품 · owned ${extra.owned.length} · 이번검색 ${searched}건 · ${((Date.now() - t0) / 1000).toFixed(0)}s`);
 
   if (PUSH) {
     try {
