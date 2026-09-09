@@ -54,12 +54,11 @@ const SOURCES = {
   newworks:{ label:"신작", variants:null, subs:()=>NEWSUBS, data:(v,s)=>newWorkSet(+s), caps:{revenue:1,badge:1,newworks:1}, filters:F_MIN, sorts:[["recent","최신순"],["per","회차당순"],["total","총매출순"]], note:s=>`런칭 최근 ${s}일 신작 · ${s}일 지나면 이 목록에서만 빠지고 데이터는 계속 쌓여요` },
 };
 const REVSUBS=[["전체","전체"],["adult","🔞성인"],["dailyplus","매일+"],["mon","월"],["tue","화"],["wed","수"],["thu","목"],["fri","금"],["sat","토"],["sun","일"]];
-/* 성인(19금) 작품만: series_extra.adult(매일 자동으로 늘어나는 성인 시리즈 pn 집합)에 매칭되는 웹툰 전부 */
+/* 성인(19금) 작품만: 웹툰 자체의 성인 플래그(details.adult = comic.naver가 막는 19금 웹툰). 새 성인신작 감지되면 매일 자동 추가 */
 function adultWorkSet(){
-  const adultPns = new Set((SERIESEXTRA&&SERIESEXTRA.adult)||[]);
-  if(!adultPns.size || !LOOKUP.id) return [];
-  const out=[], seen=new Set();
-  for(const id in LOOKUP.id){ const info=LOOKUP.id[id]; if(!info||!info[0]) continue; const r=revenueFor(info[0]); if(r && adultPns.has(r.pn) && !seen.has(+id)){ seen.add(+id); out.push({id:+id, r:0}); } }
+  if(!DETAILS || !LOOKUP.id) return [];
+  const out=[];
+  for(const id in DETAILS){ if(DETAILS[id] && DETAILS[id].adult && LOOKUP.id[id]) out.push({id:+id, r:0}); }
   return out;
 }
 function revenueWorkSet(s){
