@@ -8,3 +8,4 @@ scripts/.pw-profile/
 scripts/.pw-realprofile/
 scripts/.pw-state.json
 package-lock.json
+scripts/.notion.json
