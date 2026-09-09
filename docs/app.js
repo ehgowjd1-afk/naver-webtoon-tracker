@@ -51,15 +51,35 @@ const SOURCES = {
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][platform]&&SERIES[v][platform][scat]&&SERIES[v][platform][scat][s], caps:{move:1,tiles:1,series:1,badge:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · ${platform==="web"?"웹(PC)":"모바일"} · ${scat} · 자동` },
   promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_MIN, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
   revenue: { label:"매출순", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revenue:1,badge:1}, filters:F_MIN, sorts:[["per","회차당순"],["total","총매출순"]], note:()=>`시리즈 매출 추정 · 회차당·총매출 · 다운수×단가(웹툰320·웹소설100)×0.9×0.6` },
+  newworks:{ label:"신작", variants:null, subs:()=>NEWSUBS, data:(v,s)=>newWorkSet(+s), caps:{revenue:1,badge:1,newworks:1}, filters:F_MIN, sorts:[["recent","최신순"],["per","회차당순"],["total","총매출순"]], note:s=>`런칭 최근 ${s}일 신작 · ${s}일 지나면 이 목록에서만 빠지고 데이터는 계속 쌓여요` },
 };
-const REVSUBS=[["전체","전체"],["dailyplus","매일+"],["mon","월"],["tue","화"],["wed","수"],["thu","목"],["fri","금"],["sat","토"],["sun","일"]];
+const REVSUBS=[["전체","전체"],["adult","🔞성인"],["dailyplus","매일+"],["mon","월"],["tue","화"],["wed","수"],["thu","목"],["fri","금"],["sat","토"],["sun","일"]];
+/* 성인(19금) 작품만: series_extra.adult(매일 자동으로 늘어나는 성인 시리즈 pn 집합)에 매칭되는 웹툰 전부 */
+function adultWorkSet(){
+  const adultPns = new Set((SERIESEXTRA&&SERIESEXTRA.adult)||[]);
+  if(!adultPns.size || !LOOKUP.id) return [];
+  const out=[], seen=new Set();
+  for(const id in LOOKUP.id){ const info=LOOKUP.id[id]; if(!info||!info[0]) continue; const r=revenueFor(info[0]); if(r && adultPns.has(r.pn) && !seen.has(+id)){ seen.add(+id); out.push({id:+id, r:0}); } }
+  return out;
+}
 function revenueWorkSet(s){
+  if(s==="adult") return adultWorkSet();
   if(!WEEKDAY||!WEEKDAY.web) return [];
   if(s==="dailyplus") return WEEKDAY.web.dailyPlus||[];
   if(s==="전체"){ const seen=new Set(), out=[]; for(const day of ["mon","tue","wed","thu","fri","sat","sun","dailyPlus"]) for(const it of (WEEKDAY.web[day]||[])){ if(!seen.has(it.id)){ seen.add(it.id); out.push(it); } } return out; }
   return WEEKDAY.web[s]||[];
 }
-const GROUPS=[["naver","네이버웹툰",["app","weekday","genre","revenue"]],["series","시리즈",["series","promo"]]];
+/* 신작: details.launch(런칭일 "YY.MM.DD") 최근 N일 이내 웹툰. 지나면 목록에서만 빠지고 데이터는 유지 */
+const NEWSUBS=[["30","최근 1달"],["60","2달"],["90","3달"]];
+function parseLaunch(s){ const m=String(s||"").match(/(\d{2})\.(\d{2})\.(\d{2})/); return m?new Date(2000+ +m[1], +m[2]-1, +m[3]).getTime():0; }
+function newWorkSet(days){
+  if(!DETAILS||!LOOKUP.id) return [];
+  const cutoff=Date.now()-(days||30)*86400000, out=[];
+  for(const id in DETAILS){ const lt=parseLaunch(DETAILS[id].launch); if(lt && lt>=cutoff && LOOKUP.id[id]) out.push({id:+id, r:0}); }
+  out.sort((a,b)=>parseLaunch(DETAILS[b.id].launch)-parseLaunch(DETAILS[a.id].launch));
+  return out;
+}
+const GROUPS=[["naver","네이버웹툰",["app","weekday","genre","revenue","newworks"]],["series","시리즈",["series","promo"]]];
 let group="naver";
 const subLabel = s => src==="app" ? s : (SOURCES[src].subs().find(x=>x[0]===s)||[s,s])[1];
 const varLabel = () => { const vs=SOURCES[src].variants; return vs?(vs.find(x=>x[0]===variant)||["",""])[1]:""; };
@@ -208,7 +228,7 @@ function selectSrc(k){
   document.getElementById("q").value="";
   if(k==="series" && !SERIES){ document.getElementById("board").innerHTML=`<li class="empty">시리즈 불러오는 중…</li>`; ensureSeries().then(()=>{ setupSeriesCtl(); renderView(); }); return; }
   if(k==="promo" && !PROMO){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensurePromo().then(()=>renderView()); return; }
-  if(k==="revenue" && (!SERIES||!SERIESDET||!DETAILS)){ document.getElementById("board").innerHTML=`<li class="empty">매출 데이터 불러오는 중…</li>`; Promise.all([ensureSeries(),ensureSeriesDetails(),ensureDetails()]).then(()=>{ SNAMEIDX=null; renderView(); }); return; }
+  if((k==="revenue"||k==="newworks") && (!SERIES||!SERIESDET||!DETAILS)){ document.getElementById("board").innerHTML=`<li class="empty">${k==="newworks"?"신작":"매출"} 데이터 불러오는 중…</li>`; Promise.all([ensureSeries(),ensureSeriesDetails(),ensureDetails()]).then(()=>{ SNAMEIDX=null; renderView(); }); return; }
   if(k==="series") setupSeriesCtl();
   renderView();
 }
@@ -316,7 +336,12 @@ function renderList(){
     if(fMode==="rest") return d.b.includes("휴재");
     return true;
   });
-  if(caps.revenue || sMode==="revenue" || sMode==="per" || sMode==="total"){
+  if(caps.revenue && sMode==="recent"){
+    const lt=d=>parseLaunch(DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch);
+    rows=[...rows].sort((a,b)=>lt(b)-lt(a));
+    rows.forEach((d,i)=>{ d._rk=i+1; });
+  }
+  else if(caps.revenue || sMode==="revenue" || sMode==="per" || sMode==="total"){
     const key = sMode==="total" ? "full" : "per";
     rows=[...rows].sort((a,b)=>{ const ra=revenueFor(a.name,detEp(a)),rb=revenueFor(b.name,detEp(b)); return (rb?rb[key]:-1)-(ra?ra[key]:-1); });
     if(caps.revenue) rows.forEach((d,i)=>{ d._rk=i+1; });
@@ -335,7 +360,7 @@ function renderList(){
     const thumb=d.th?`<img class="thumb" loading="lazy" src="${esc(d.th)}" alt="">`:`<div class="thumb ph">🎬</div>`;
     return `<li class="rowli ${rk<=3?"top"+rk:""}" role="button" tabindex="0" data-i="${i}">
       <div class="rk tnum">${rk}</div>${thumb}
-      <div class="cell"><div class="ttl"><span class="name">${esc(d.name)}</span>${badgeHtml(d)}</div><div class="auth">${esc(d.a)}</div></div>
+      <div class="cell"><div class="ttl"><span class="name">${esc(d.name)}</span>${badgeHtml(d)}</div><div class="auth">${esc(d.a)}${caps.newworks&&DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch?` · <span style="color:var(--accent)">🆕 ${esc(DETAILS[d.id].launch)}</span>`:""}</div></div>
       ${showRev ? revHtml(d) : (caps.move?moveHtml(d.m):"")}
     </li>`;
   }).join("");
