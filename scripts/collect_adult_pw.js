@@ -88,8 +88,8 @@ async function collectAll(page, opts = {}) {
     const page = context.pages()[0] || await context.newPage();
     if (PUSH) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); } catch (e) {} }
     if (!(await adultOk(context))) { console.log("❌ 그 크롬에서 성인 접근이 안 돼요 — 네이버 로그인 + 19금 작품 '연령확인'부터 사람이 직접 해주세요."); await browser.close(); process.exit(2); }
-    console.log(`✅ 진짜 크롬 세션으로 성인 접근 OK — 천천히 최대 ${MAX}개만 수집(계정 부담 최소화)`);
-    const got = await collectAll(page, { cap: MAX, dmin: 4000, dmax: 9000 }); // 4~9초 간격, 소량
+    console.log(`✅ 진짜 크롬 세션으로 성인 접근 OK — 최대 ${MAX}개 수집(2~4.5초 간격)`);
+    const got = await collectAll(page, { cap: MAX, dmin: 2000, dmax: 4500 }); // 매일 전체 갱신용(적당히 천천히)
     await browser.close(); // CDP는 disconnect만 (사용자 크롬은 그대로 열려있음)
     if (PUSH && got > 0) pushData();
     return;
