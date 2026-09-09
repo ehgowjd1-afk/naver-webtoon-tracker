@@ -52,7 +52,8 @@ function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^
   // 랭킹작 normName -> [{pn,kind}]
   const idx = {};
   for (const kind of ["comic", "novel"]) for (const pf of ["web", "mobile"]) for (const c in (series[kind] || {})[pf] || {}) for (const p in series[kind][pf][c]) for (const it of series[kind][pf][c][p]) { const n = normName(it.t); (idx[n] || (idx[n] = [])).push({ pn: it.id, kind }); }
-  const resolves = n => (idx[n] || []).some(x => sd[x.pn] && sd[x.pn].dl && sd[x.pn].ep) || (extra.map[n] || []).some(x => sd[x.pn] && sd[x.pn].dl && sd[x.pn].ep);
+  // 웹툰은 '코믹' 시리즈에 연결돼야 완료. 웹소설(novel)만 연결된 건 미완료로 보고 코믹 찾을 때까지 재검색(코믹이 있으면 그걸로 교체).
+  const hasComic = n => (idx[n] || []).some(x => x.kind === "comic" && sd[x.pn] && sd[x.pn].dl && sd[x.pn].ep) || (extra.map[n] || []).some(x => x.kind === "comic" && sd[x.pn] && sd[x.pn].dl && sd[x.pn].ep);
 
   function flush() { extra.owned = [...ownedSet]; extra.updated = new Date().toISOString(); fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd)); fs.writeFileSync(path.join(D, "series_extra.json"), JSON.stringify(extra)); }
   async function scrapeDetail(pn, kind) { try { const h = await getText(`https://series.naver.com/${kind}/detail.series?productNo=${pn}`); const pd = C.parseSeriesDetail(h); pd.kind = kind; if (pd.dl || pd.g || pd.ep || pd.syn) { sd[pn] = C.mergeDetail(sd[pn], pd, kind); return pd; } } catch (e) {} return null; }
@@ -63,7 +64,7 @@ function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^
   for (const w of wt) {
     if (searched >= MAXNEW) break;
     const key = normName(w.name);
-    if (resolves(key)) continue;   // 이미 시리즈 연결됨(dl 있음) → 스킵. 안 된 건 매일 계속 재검색(연결될 때까지)
+    if (hasComic(key)) continue;   // 코믹(웹툰) 시리즈 연결 완료 → 스킵. 미연결/웹소설만연결 → 매일 재검색(코믹 나올 때까지)
     searched++;
     try {
       const h = await getText(`https://series.naver.com/search/search.series?t=all&q=${encodeURIComponent(w.name)}`);
