@@ -51,7 +51,7 @@ function computeRanking() {
   for (const id in (lookup.id || {})) {
     const info = lookup.id[id]; if (!info || !info[0]) continue;
     const name = info[0]; if (seen.has(name)) continue;
-    const cands = (idx[normName(name)] || []).map(c => ({ ...c, d: sd[c.pn] })).filter(x => x.d && x.d.dl && x.d.ep).sort((a, b) => (a.kind === "comic" ? 0 : 1) - (b.kind === "comic" ? 0 : 1));
+    const cands = (idx[normName(name)] || []).map(c => ({ ...c, d: sd[c.pn] })).filter(x => x.kind === "comic" && x.d && x.d.dl && x.d.ep);   // 웹툰(코믹)만 — 웹소설 제외
     const best = cands[0]; if (!best) continue;
     const dl = C.parseDlNum(best.d.dl), wep = (details[id] && details[id].ep) || best.d.ep;
     if (!dl || !wep) continue;
@@ -89,12 +89,21 @@ async function alreadySynced(dbId, date) {
   const j = await napi("POST", "/databases/" + dbId + "/query", { filter: { property: "날짜", date: { equals: date } }, page_size: 1 });
   return (j.results || []).length > 0;
 }
+async function clearDate(dbId, date) {   // --force: 그날 기존 행 삭제 후 다시 채움
+  let cursor, ids = [];
+  do { const j = await napi("POST", "/databases/" + dbId + "/query", { filter: { property: "날짜", date: { equals: date } }, page_size: 100, start_cursor: cursor }); for (const p of (j.results || [])) ids.push(p.id); cursor = j.has_more ? j.next_cursor : null; } while (cursor);
+  console.log("기존 " + date + " " + ids.length + "행 삭제…");
+  for (const id of ids) { try { await napi("PATCH", "/pages/" + id, { archived: true }); } catch (e) {} await sleep(130); }
+}
+const FORCE = process.argv.includes("--force");
 
 (async () => {
   if (!cfg.token || !cfg.pageId) { console.log("❌ .notion.json에 token/pageId 필요"); process.exit(1); }
   const dbId = await ensureDb();
   const date = isoDate();
-  if (await alreadySynced(dbId, date)) { console.log(date + " 이미 노션에 있음 — 스킵"); return; }
+  const synced = await alreadySynced(dbId, date);
+  if (synced && !FORCE) { console.log(date + " 이미 노션에 있음 — 스킵 (다시채우려면 --force)"); return; }
+  if (synced && FORCE) await clearDate(dbId, date);
   const rows = computeRanking().slice(0, TOPN);
   console.log(date + " · 매출순 상위 " + rows.length + "개를 노션에 추가…");
   let n = 0;

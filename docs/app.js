@@ -38,7 +38,7 @@ function seriesNameIndex(){
 function revenueFor(name, epOverride){
   if(!SERIES||!SERIESDET) return null;
   const cands=seriesNameIndex()[normName(name)]; if(!cands||!cands.length) return null;
-  const best=cands.map(c=>({...c,d:SERIESDET[c.pn]})).filter(x=>x.d&&x.d.dl&&x.d.ep).sort((a,b)=>(a.kind==="comic"?0:1)-(b.kind==="comic"?0:1))[0];
+  const best=cands.map(c=>({...c,d:SERIESDET[c.pn]})).filter(x=>x.kind==="comic"&&x.d&&x.d.dl&&x.d.ep)[0];   // 웹툰(코믹) 시리즈만 — 웹소설 매칭 제외(코믹 없으면 시리즈없음)
   if(!best) return null;
   const dl=parseDl(best.d.dl), ep=(epOverride>0?epOverride:(best.d.ep||1)), total=dl*UNIT_PRICE(best.kind)*0.9*0.6;   // 총매출 = 다운수×단가(웹툰320·웹소설100)×0.9×0.6
   return { full: total, per: total/ep, dl, dlStr:best.d.dl, star:best.d.star, cmt:best.d.cmt, ep, sep:best.d.ep, kind:best.kind, pn:best.pn };  // per(회차당)=총÷회차수(작품 회차수 우선)
