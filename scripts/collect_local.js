@@ -70,7 +70,7 @@ function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^
       const h = await getText(`https://series.naver.com/search/search.series?t=all&q=${encodeURIComponent(w.name)}`);
       const res = C.parseSeriesSearch(h);
       const nm = normMatch(w.name);
-      const hit = res.find(r => r.kind === "comic" && normMatch(r.title) === nm) || res.find(r => r.kind === "novel" && normMatch(r.title) === nm);
+      const hit = res.find(r => r.kind === "comic" && normMatch(r.title) === nm);   // 웹툰은 '코믹'만 연결(웹소설은 동명이작 오연결 위험 + 다른 상품이라 제외). 코믹 없으면 시리즈없음(다운수 0)
       if (hit) {
         const pd = await scrapeDetail(hit.pn, hit.kind);
         const a = extra.map[key] || (extra.map[key] = []);
