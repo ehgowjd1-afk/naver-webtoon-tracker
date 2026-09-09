@@ -203,9 +203,9 @@ async function collectDetails(existing){
     }));
     await sleep(50);
   }
-  // 기존 작품 회차수(ep) 매일 갱신 — article/list totalCount. (회차·댓글평균 정확도) 장르/키워드/제작사는 잘 안 바뀌어 유지.
+  // 기존 작품 회차수(ep) 매일 갱신 — article/list totalCount("총 N화"). 랭킹에서 빠진 작품·검색전용 작품까지 details 전체 갱신(회차당 매출 기준값이라 최신 유지).
   const todoSet = new Set(todo);
-  const refresh = ids.filter(id => details[id] && !todoSet.has(id));
+  const refresh = Object.keys(details).map(Number).filter(id => !todoSet.has(id));
   let rf = 0;
   for(let i=0;i<refresh.length;i+=CONC){
     await Promise.all(refresh.slice(i,i+CONC).map(async id=>{
