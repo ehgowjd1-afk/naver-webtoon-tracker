@@ -1,10 +1,14 @@
-// 성인 시리즈 '다운수' 자동수집 — Playwright로 로그인된 크롬 세션 사용(쿠키 만료 문제 회피)
+// 성인 시리즈 '다운수' 반자동 수집 — Playwright로 로그인된 크롬 세션 사용
 //
-// 최초 1회 (로그인):  node scripts/collect_adult_pw.js --login
-//   → 크롬 창이 열립니다. 네이버 로그인 + 성인 웹툰 하나 열어 '성인 인증'까지 하고, 이 터미널에서 Enter.
-// 매일 (자동):        node scripts/collect_adult_pw.js --push
-//   → 저장된 세션으로 성인 시리즈 다운수 갱신 + 커밋/푸시 (run_adult_pw.bat 로 스케줄러 등록)
-// 테스트:             node scripts/collect_adult_pw.js --test   (비성인 1작품으로 파이프라인 확인)
+// ※ 네이버는 성인 콘텐츠에 대해 '브라우저를 새로 켤 때마다' 연령확인을 요구하고 그 인증은
+//    세션이 닫히면 사라집니다. 따라서 무인(스케줄러) 자동은 불가하고, 아래처럼 반자동으로만 됩니다.
+//
+// 사용법:
+//   node scripts/collect_adult_pw.js --verify --push
+//     → 크롬 창이 열립니다. (필요시 네이버 로그인 후) 뜬 19금 작품에서 '연령확인'을 완료하세요.
+//       성인 접근이 확인되면 그 세션에서 바로 다운수를 수집하고 커밋/푸시합니다. 끝나면 자동으로 닫힘.
+//   node scripts/collect_adult_pw.js --verify        (수집만, 푸시 안 함)
+//   node scripts/collect_adult_pw.js --test          (파이프라인 점검, 비성인)
 
 const { chromium } = require("playwright-core");
 const C = require("./collect.js");
@@ -16,102 +20,117 @@ const ROOT = path.join(__dirname, "..");
 const D = path.join(ROOT, "docs", "data");
 const PROFILE = path.join(__dirname, ".pw-profile");
 const args = process.argv.slice(2);
-const LOGIN = args.includes("--login");
+const VERIFY = args.includes("--verify");
 const PUSH = args.includes("--push");
 const TEST = args.includes("--test");
-
+const AUTO = args.includes("--auto");
+const CDP = args.includes("--cdp");
+const MAX = Number((args.find(a => a.startsWith("--max=")) || "").split("=")[1] || 30);
+const STATE = path.join(__dirname, ".pw-state.json"); // 연령확인된 세션 상태(쿠키) 저장 — 자동수집 재사용용(git 제외)
+function pushData() {
+  try {
+    execSync(`git -C "${ROOT}" add docs/data/series_details.json docs/data/series_extra.json docs/data/revenue_history.json`, { stdio: "inherit" });
+    execSync(`git -C "${ROOT}" commit -m "adult: 성인 시리즈 다운수 ${C.isoDate()}"`, { stdio: "inherit" });
+    for (let i = 0; i < 3; i++) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); execSync(`git -C "${ROOT}" push origin main`, { stdio: "inherit" }); console.log("푸시 완료"); return; } catch (e) { console.log("재시도", i + 1); } }
+  } catch (e) { console.log("변경 없음/커밋 스킵"); }
+}
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(D, f), "utf8")); } catch (e) { return d; } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const CHECK_PN = 10851069, CHECK_KIND = "comic"; // 성인 접근 확인용 기준작(로그인+연령확인 되면 dl 노출)
 
-async function launch() {
-  return chromium.launchPersistentContext(PROFILE, {
-    channel: "chrome",
-    headless: !(LOGIN),
-    viewport: { width: 1280, height: 900 },
-    args: ["--disable-blink-features=AutomationControlled"]
-  });
-}
-async function loggedIn(page) {
-  await page.goto("https://series.naver.com/", { waitUntil: "domcontentloaded", timeout: 40000 }).catch(() => {});
-  const h = await page.content();
-  return /로그아웃|내서재|MY_NELmenu|gnb_my|nlog-logout/i.test(h);
-}
 async function scrapeDl(page, pn, kind) {
-  await page.goto(`https://series.naver.com/${kind}/detail.series?productNo=${pn}`, { waitUntil: "domcontentloaded", timeout: 40000 });
-  // 성인 인증/확인 버튼 있으면 클릭
-  for (const sel of ["a:has-text('성인 인증하고')", "button:has-text('성인 인증')", "a:has-text('19세 이상')", ".btn_adult", "a:has-text('확인')"]) {
-    const b = await page.$(sel).catch(() => null);
-    if (b) { await b.click().catch(() => {}); await sleep(700); break; }
-  }
-  const html = await page.content();
-  const pd = C.parseSeriesDetail(html); pd.kind = kind;
-  return pd;
+  await page.goto(`https://series.naver.com/${kind}/detail.series?productNo=${pn}`, { waitUntil: "domcontentloaded", timeout: 30000 });
+  const pd = C.parseSeriesDetail(await page.content()); pd.kind = kind; return pd;
 }
-
-(async () => {
-  const ctx = await launch();
-  const page = ctx.pages()[0] || await ctx.newPage();
-
-  if (LOGIN) {
-    await page.goto("https://nid.naver.com/nidlogin.login?url=https%3A%2F%2Fseries.naver.com%2F").catch(() => {});
-    console.log("\n>>> 열린 크롬 창에서 네이버에 로그인하세요.");
-    console.log(">>> 그리고 성인(19금) 웹툰 하나를 열어 '성인 인증'까지 완료하세요.");
-    console.log(">>> 다 되면 여기(터미널)에서 Enter 를 누르세요...\n");
-    await new Promise(res => process.stdin.once("data", res));
-    console.log(await loggedIn(page) ? "✅ 로그인 확인됨 — 프로필 저장 완료. 이제 --push 로 매일 자동수집 가능." : "⚠️ 로그인 확인 안 됨 — 다시 --login 시도하세요.");
-    await ctx.close(); return;
-  }
-
-  if (TEST) {
-    const pd = await scrapeDl(page, 42918, "comic"); // 비성인 공개작
-    console.log("파이프라인 테스트 (42918 화산귀환): dl=" + (pd.dl || "없음") + " ep=" + (pd.ep || "?") + " → " + (pd.dl ? "✅ 브라우저 스크랩 정상" : "❌ 실패"));
-    await ctx.close(); return;
-  }
-
-  if (!(await loggedIn(page))) {
-    console.log("❌ 로그인 안 됨 — 먼저 `node scripts/collect_adult_pw.js --login` 을 실행하세요.");
-    await ctx.close(); process.exit(1);
-  }
-  if (PUSH) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); } catch (e) {} }
-
-  const sd = readJSON("series_details.json", {});
-  const extra = readJSON("series_extra.json", { map: {}, owned: [], adult: [] });
-  extra.adult = extra.adult || [];
+async function adultOk(ctx) {
+  try { const cp = await ctx.newPage(); await cp.goto(`https://series.naver.com/${CHECK_KIND}/detail.series?productNo=${CHECK_PN}`, { waitUntil: "domcontentloaded", timeout: 20000 }); const pd = C.parseSeriesDetail(await cp.content()); await cp.close(); return !!pd.dl; } catch (e) { return false; }
+}
+async function collectAll(page, opts = {}) {
+  const { cap = Infinity, dmin = 300, dmax = 300 } = opts;
+  const sd = readJSON("series_details.json", {}), extra = readJSON("series_extra.json", { map: {}, owned: [], adult: [], seen: {} });
+  extra.adult = extra.adult || []; extra.seen = extra.seen || {};
   const series = readJSON("series.json", { comic: {}, novel: {} });
-
-  // 대상: 웹툰이 연동한 시리즈 pn(extra.map) + 랭킹 시리즈 pn 중, 다운수 없거나 이미 성인으로 확인된 것
   const pnKind = {};
   for (const n in extra.map) for (const e of extra.map[n]) pnKind[e.pn] = e.kind;
   for (const kind of ["comic", "novel"]) for (const pf of ["web", "mobile"]) for (const c in (series[kind] || {})[pf] || {}) for (const p in series[kind][pf][c]) for (const it of series[kind][pf][c][p]) if (!(it.id in pnKind)) pnKind[it.id] = kind;
   const adultSet = new Set(extra.adult);
-  const referenced = new Set([...Object.keys(pnKind).map(Number)]);
-  const targets = [...referenced].filter(pn => adultSet.has(pn) || !(sd[pn] && sd[pn].dl));
-
-  console.log(`대상 ${targets.length}개 스크랩 (기존 성인 ${adultSet.size} + 다운수없음)`);
-  let got = 0, done = 0, newAdult = 0;
+  let targets = [...new Set(Object.keys(pnKind).map(Number))].filter(pn => adultSet.has(pn) || !(sd[pn] && sd[pn].dl));
+  // 오래 안 본 것부터(제일 stale 우선) — cap이 있으면 매 실행마다 조금씩 나눠서 부담 최소화
+  targets.sort((a, b) => (extra.seen[a] || 0) - (extra.seen[b] || 0));
+  if (targets.length > cap) targets = targets.slice(0, cap);
+  console.log("대상 " + targets.length + "개 수집" + (cap !== Infinity ? " (이번 회차 상한 " + cap + ")" : ""));
+  const today = C.isoDate();
+  let got = 0, done = 0;
   for (const pn of targets) {
     const kind = pnKind[pn] || (sd[pn] && sd[pn].kind) || "comic";
-    const hadDl = !!(sd[pn] && sd[pn].dl);
-    try {
-      const pd = await scrapeDl(page, pn, kind);
-      if (pd.dl) { sd[pn] = C.mergeDetail(sd[pn], pd, kind); got++; if (!hadDl && !adultSet.has(pn)) { adultSet.add(pn); newAdult++; } }
-    } catch (e) {}
+    const had = !!(sd[pn] && sd[pn].dl);
+    try { const pd = await scrapeDl(page, pn, kind); if (pd.dl) { sd[pn] = C.mergeDetail(sd[pn], pd, kind); got++; if (!had) adultSet.add(pn); } } catch (e) {}
+    extra.seen[pn] = today;
     done++;
-    if (done % 20 === 0) { fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd)); console.log(`  ${done}/${targets.length} (다운수 ${got})`); }
-    await sleep(350);
+    if (done % 10 === 0) { fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd)); console.log("  " + done + "/" + targets.length + " (다운수 " + got + ")"); }
+    await sleep(dmin + Math.floor(Math.random() * Math.max(0, dmax - dmin)));
   }
   extra.adult = [...adultSet];
   fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd));
   fs.writeFileSync(path.join(D, "series_extra.json"), JSON.stringify(extra));
   const rh = C.updateRevenueHistory(D, C.isoDate());
-  console.log(`완료: ${got}/${targets.length} 다운수 확보 (신규 성인 ${newAdult}) · 매출히스토리 ${JSON.stringify(rh)}`);
-  await ctx.close();
+  console.log(`완료: ${got}개 다운수 확보 · 매출히스토리 ${JSON.stringify(rh)}`);
+  return got;
+}
 
-  if (PUSH && got > 0) {
-    try {
-      execSync(`git -C "${ROOT}" add docs/data/series_details.json docs/data/series_extra.json docs/data/revenue_history.json`, { stdio: "inherit" });
-      execSync(`git -C "${ROOT}" commit -m "adult(pw): 성인 시리즈 다운수 ${C.isoDate()}"`, { stdio: "inherit" });
-      for (let i = 0; i < 3; i++) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); execSync(`git -C "${ROOT}" push origin main`, { stdio: "inherit" }); console.log("푸시 완료"); break; } catch (e) { console.log("재시도", i + 1); } }
-    } catch (e) { console.log("변경 없음/커밋 스킵"); }
+(async () => {
+  // --cdp: 사용자가 직접 켠 '진짜 크롬'(원격 디버깅)에 붙어서, 사람이 로그인/연령확인한 세션으로 아주 천천히 조금씩 수집 (계정 부담 최소화)
+  if (CDP) {
+    let browser;
+    try { browser = await chromium.connectOverCDP("http://localhost:9222"); }
+    catch (e) { console.log("❌ 디버그 크롬에 연결 실패 — 먼저 chrome_debug.bat 로 크롬을 켜고 네이버 로그인+연령확인 하세요."); process.exit(1); }
+    const context = browser.contexts()[0] || await browser.newContext();
+    const page = context.pages()[0] || await context.newPage();
+    if (PUSH) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); } catch (e) {} }
+    if (!(await adultOk(context))) { console.log("❌ 그 크롬에서 성인 접근이 안 돼요 — 네이버 로그인 + 19금 작품 '연령확인'부터 사람이 직접 해주세요."); await browser.close(); process.exit(2); }
+    console.log(`✅ 진짜 크롬 세션으로 성인 접근 OK — 천천히 최대 ${MAX}개만 수집(계정 부담 최소화)`);
+    const got = await collectAll(page, { cap: MAX, dmin: 4000, dmax: 9000 }); // 4~9초 간격, 소량
+    await browser.close(); // CDP는 disconnect만 (사용자 크롬은 그대로 열려있음)
+    if (PUSH && got > 0) pushData();
+    return;
   }
+
+  // --auto: 저장된 세션 상태(.pw-state.json) 재사용해 헤드리스로 수집 (스케줄러용, 재인증 불필요 — 상태가 살아있는 동안)
+  if (AUTO) {
+    let state; try { state = JSON.parse(fs.readFileSync(STATE, "utf8")); } catch (e) { console.log("❌ 저장된 세션 없음 — 먼저 verify_adult.bat(--verify) 1회 실행하세요."); process.exit(1); }
+    const browser = await chromium.launch({ channel: "chrome", headless: true });
+    const actx = await browser.newContext({ storageState: state, viewport: { width: 1280, height: 900 } });
+    const apage = await actx.newPage();
+    if (PUSH) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); } catch (e) {} }
+    if (!(await adultOk(actx))) { console.log("❌ 저장된 세션으로 성인 접근 불가(만료됨) — verify_adult.bat로 재인증 필요"); await browser.close(); process.exit(2); }
+    console.log("✅ 저장된 세션으로 성인 접근 OK — 수집 시작");
+    const got = await collectAll(apage);
+    await browser.close();
+    if (PUSH && got > 0) pushData();
+    return;
+  }
+
+  const ctx = await chromium.launchPersistentContext(PROFILE, { channel: "chrome", headless: !VERIFY, viewport: { width: 1280, height: 900 } });
+  const page = ctx.pages()[0] || await ctx.newPage();
+
+  if (TEST) { const pd = await scrapeDl(page, 42918, "comic"); console.log("테스트(42918 화산귀환): dl=" + (pd.dl || "없음") + " → " + (pd.dl ? "✅ OK" : "❌ 실패")); await ctx.close(); return; }
+
+  if (VERIFY) {
+    if (PUSH) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); } catch (e) {} }
+    await page.goto(`https://series.naver.com/${CHECK_KIND}/detail.series?productNo=${CHECK_PN}`).catch(() => {});
+    console.log("\n>>> 열린 크롬 창에서 (필요하면 네이버 로그인 후) 이 19금 작품의 '연령확인'을 완료하세요.");
+    console.log(">>> 성인 접근이 확인되면 자동으로 수집을 시작합니다 (최대 6분 대기)...\n");
+    let ok = false;
+    for (let i = 0; i < 36; i++) { await sleep(10000); if (await adultOk(ctx)) { ok = true; break; } }
+    if (!ok) { console.log("❌ 성인 접근 확인 안 됨 (연령확인 미완료) — 종료합니다."); await ctx.close(); return; }
+    console.log("✅ 성인 접근 확인 — 세션 상태 저장 후 수집 시작");
+    try { fs.writeFileSync(STATE, JSON.stringify(await ctx.storageState())); console.log("   세션 상태 저장 완료(.pw-state.json) — 다음부터 --auto로 재사용 시도"); } catch (e) {}
+    const got = await collectAll(page);
+    await ctx.close();
+    if (PUSH && got > 0) pushData();
+    return;
+  }
+
+  console.log("사용법: node scripts/collect_adult_pw.js --verify --push   (창에서 연령확인 후 자동 수집)");
+  await ctx.close();
 })().catch(e => { console.error("FAILED:", e.message); process.exit(1); });

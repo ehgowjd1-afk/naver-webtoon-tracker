@@ -5,4 +5,4 @@ cd /d "%~dp0.."
 set NODE_EXE=C:\Program Files\nodejs\node.exe
 if not exist "%NODE_EXE%" set NODE_EXE=node
 "%NODE_EXE%" scripts\collect_local.js --push >> scripts\local_last_run.log 2>&1
-"%NODE_EXE%" scripts\collect_adult_pw.js --push >> scripts\local_last_run.log 2>&1
+REM 성인 다운수는 네이버 연령 재인증(세션 한정) 때문에 무인 자동 불가 → 반자동(verify_adult.bat)으로 분리
