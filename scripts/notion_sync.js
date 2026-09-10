@@ -1,6 +1,7 @@
-// 노션 연동 v2: 작품당 '한 줄'(최신값, 매일 제자리 갱신) + 각 작품 페이지 안에 날짜별 '누적 기록'
-//  - 메인 표: 작품 1개 = 1행. 매일 다운수/매출/순위를 그 행에서 갱신(중복 줄 안 생김)
-//  - 각 작품 페이지 열면: 날짜별 다운수·총매출 기록이 쌓여있음(revenue_history로 backfill + 매일 1줄 추가)
+// 노션 연동 v3: 작품당 '한 줄'(최신값, 매일 제자리 갱신) + 각 작품 페이지 안에 날짜별 '누적 기록'
+//  - 메인 표 컬럼: 작품 · 순위 · 회차당(원) · 총매출(원) · 전일대비(%) · 다운수 · 회차수 · 성인 · 갱신일
+//  - 전일대비(%): 어제 대비 다운수/매출 증감률(+오름/-내림)
+//  - 각 작품 페이지: revenue_history로 날짜별 기록 backfill + 오늘치 포함, 매일 1줄 추가
 // 사용: node scripts/notion_sync.js [--top=300] [--force]
 // 설정: scripts/.notion.json {token, pageId, dbId, schema}  (git 제외)
 
@@ -11,6 +12,7 @@ const ROOT = path.join(__dirname, "..");
 const D = path.join(ROOT, "docs", "data");
 const CFG = path.join(__dirname, ".notion.json");
 const NV = "2022-06-28";
+const SCHEMA = "v3";
 let cfg = {};
 try { cfg = JSON.parse(fs.readFileSync(CFG, "utf8")); } catch (e) { console.log("노션 설정(.notion.json) 없음 — 스킵"); process.exit(0); }
 if (process.env.NOTION_TOKEN) cfg.token = process.env.NOTION_TOKEN;
@@ -36,8 +38,15 @@ const UNIT = k => k === "novel" ? 100 : 320;
 const isoDate = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
 const won = n => Number(n || 0).toLocaleString();
 
-// '오늘' 매출순(웹툰=코믹만) + 각 작품 comic pn
-function computeRanking() {
+// 전일대비 %: revenue_history에 기록된 '가장 최근 두 날' 다운수 증감(항상 실제 변화 표시)
+function lastChange(revhist, pn) {
+  const w = revhist.works && revhist.works[pn]; if (!w) return null;
+  const vals = (w.dl || []).filter(x => x != null);
+  if (vals.length < 2) return null;
+  const prev = vals[vals.length - 2], last = vals[vals.length - 1];
+  return prev > 0 ? Math.round((last - prev) / prev * 1000) / 10 : null;
+}
+function computeRanking(revhist, today) {
   const series = readJSON("series.json", { comic: {}, novel: {} });
   const sd = readJSON("series_details.json", {});
   const details = readJSON("details.json", {});
@@ -56,33 +65,34 @@ function computeRanking() {
     const dl = C.parseDlNum(best.d.dl), wep = (details[id] && details[id].ep) || best.d.ep;
     if (!dl || !wep) continue;
     const total = dl * UNIT(best.kind) * 0.9 * 0.6;
+    const change = lastChange(revhist, best.pn);   // 전일대비 % (최근 두 날 기록 기준)
     seen.add(name);
-    rows.push({ name, total: Math.round(total), per: Math.round(total / wep), dl, ep: wep, adult: adultSet.has(best.pn), pn: best.pn });
+    rows.push({ name, total: Math.round(total), per: Math.round(total / wep), dl, ep: wep, adult: adultSet.has(best.pn), pn: best.pn, change });
   }
   rows.sort((a, b) => b.total - a.total);
   rows.forEach((r, i) => r.rank = i + 1);
   return rows;
 }
-// revenue_history에서 특정 comic pn의 날짜별 [{date, dl, total}] (누적 기록 backfill용)
 function historyFor(revhist, pn) {
   const w = revhist.works && revhist.works[pn]; if (!w) return [];
-  const dates = revhist.dates || [];
-  const out = [];
+  const dates = revhist.dates || [], out = [];
   for (let i = 0; i < dates.length; i++) { const dl = w.dl[i]; if (dl == null) continue; out.push({ date: dates[i], dl, total: Math.round(dl * 320 * 0.9 * 0.6) }); }
   return out;
 }
 const histLine = h => `${h.date} · 다운수 ${won(h.dl)} · 총매출 ${won(h.total)}원`;
 function props(r, date) {
-  return {
+  const p = {
     "작품": { title: [{ text: { content: r.name } }] },
     "순위": { number: r.rank },
-    "다운수": { number: r.dl },
-    "총매출(원)": { number: r.total },
     "회차당(원)": { number: r.per },
+    "총매출(원)": { number: r.total },
+    "전일대비(%)": { number: r.change == null ? null : r.change },
+    "다운수": { number: r.dl },
     "회차수": { number: r.ep },
     "성인": { checkbox: !!r.adult },
     "갱신일": { date: { start: date } }
   };
+  return p;
 }
 async function appendBlocks(pageId, lines) {
   for (let i = 0; i < lines.length; i += 90) {
@@ -92,21 +102,22 @@ async function appendBlocks(pageId, lines) {
   }
 }
 async function ensureDb() {
-  if (cfg.dbId && cfg.schema === "v2") return cfg.dbId;
-  if (cfg.dbId) { try { await napi("PATCH", "/blocks/" + cfg.dbId, { archived: true }); console.log("이전 표 정리(보관처리)"); } catch (e) {} }
+  if (cfg.dbId && cfg.schema === SCHEMA) return cfg.dbId;
+  if (cfg.dbId) { try { await napi("PATCH", "/blocks/" + cfg.dbId, { archived: true }); console.log("이전 표 보관처리"); } catch (e) {} }
   const db = await napi("POST", "/databases", {
     parent: { type: "page_id", page_id: cfg.pageId },
     title: [{ type: "text", text: { content: "매출순 (작품당 1행·페이지 안 누적)" } }],
     properties: {
       "작품": { title: {} }, "순위": { number: {} },
-      "다운수": { number: { format: "number_with_commas" } },
-      "총매출(원)": { number: { format: "number_with_commas" } },
       "회차당(원)": { number: { format: "number_with_commas" } },
+      "총매출(원)": { number: { format: "number_with_commas" } },
+      "전일대비(%)": { number: {} },
+      "다운수": { number: { format: "number_with_commas" } },
       "회차수": { number: {} }, "성인": { checkbox: {} }, "갱신일": { date: {} }
     }
   });
-  cfg.dbId = db.id; cfg.schema = "v2"; fs.writeFileSync(CFG, JSON.stringify(cfg, null, 2));
-  console.log("✅ 새 표 생성 (작품당 1행 + 페이지 안 누적)");
+  cfg.dbId = db.id; cfg.schema = SCHEMA; fs.writeFileSync(CFG, JSON.stringify(cfg, null, 2));
+  console.log("✅ 새 표 생성 (" + SCHEMA + ")");
   return db.id;
 }
 async function loadRows(dbId) {
@@ -122,8 +133,8 @@ async function loadRows(dbId) {
 (async () => {
   const dbId = await ensureDb();
   const date = isoDate();
-  const rows = computeRanking().slice(0, TOPN);
   const revhist = readJSON("revenue_history.json", { dates: [], works: {} });
+  const rows = computeRanking(revhist, date).slice(0, TOPN);
   const existing = await loadRows(dbId);
   console.log(date + " · 매출순 상위 " + rows.length + "개 (기존 " + Object.keys(existing).length + "행) 갱신…");
   let upd = 0, cre = 0;
@@ -132,13 +143,13 @@ async function loadRows(dbId) {
       const ex = existing[r.name];
       if (ex) {
         await napi("PATCH", "/pages/" + ex.id, { properties: props(r, date) });
-        if (FORCE || ex.updated !== date) await appendBlocks(ex.id, [histLine({ date, dl: r.dl, total: r.total })]); // 오늘 기록 1줄(오늘 이미 있으면 스킵)
+        if (FORCE || ex.updated !== date) await appendBlocks(ex.id, [histLine({ date, dl: r.dl, total: r.total })]);
         upd++;
       } else {
         const page = await napi("POST", "/pages", { parent: { database_id: dbId }, properties: props(r, date) });
         const hist = historyFor(revhist, r.pn);
-        const lines = hist.length ? hist.map(histLine) : [histLine({ date, dl: r.dl, total: r.total })];
-        await appendBlocks(page.id, ["📈 날짜별 누적 기록", ...lines].slice(0, 100));
+        if (!hist.some(h => h.date === date)) hist.push({ date, dl: r.dl, total: r.total });   // 오늘치 포함
+        await appendBlocks(page.id, ["📈 날짜별 누적 기록", ...hist.map(histLine)].slice(0, 100));
         cre++;
       }
     } catch (e) { console.log("  실패:", r.name, e.message); }
