@@ -1,9 +1,8 @@
-// 노션 연동: 매일 '매출순' 상위 N개를 노션 데이터베이스에 한 줄씩 추가(누적)
-//  - 처음 실행 시 페이지에 "매출순 누적" 표(DB)를 자동 생성
-//  - 같은 날 두 번 돌려도 중복 안 됨(그날 이미 있으면 스킵)
-// 사용: node scripts/notion_sync.js            (기본 상위 300)
-//       node scripts/notion_sync.js --top=500
-// 설정: scripts/.notion.json {token, pageId, dbId}  (git 제외)
+// 노션 연동 v2: 작품당 '한 줄'(최신값, 매일 제자리 갱신) + 각 작품 페이지 안에 날짜별 '누적 기록'
+//  - 메인 표: 작품 1개 = 1행. 매일 다운수/매출/순위를 그 행에서 갱신(중복 줄 안 생김)
+//  - 각 작품 페이지 열면: 날짜별 다운수·총매출 기록이 쌓여있음(revenue_history로 backfill + 매일 1줄 추가)
+// 사용: node scripts/notion_sync.js [--top=300] [--force]
+// 설정: scripts/.notion.json {token, pageId, dbId, schema}  (git 제외)
 
 const fs = require("fs");
 const path = require("path");
@@ -13,30 +12,31 @@ const D = path.join(ROOT, "docs", "data");
 const CFG = path.join(__dirname, ".notion.json");
 const NV = "2022-06-28";
 let cfg = {};
-try { cfg = JSON.parse(fs.readFileSync(CFG, "utf8")); } catch (e) { console.log("노션 설정(.notion.json) 없음 — 노션 동기화 스킵"); process.exit(0); }
-if (process.env.NOTION_TOKEN) cfg.token = process.env.NOTION_TOKEN;   // Actions(클라우드)에선 시크릿에서 읽음
-if (process.env.NOTION_DB_ID) cfg.dbId = process.env.NOTION_DB_ID;
+try { cfg = JSON.parse(fs.readFileSync(CFG, "utf8")); } catch (e) { console.log("노션 설정(.notion.json) 없음 — 스킵"); process.exit(0); }
+if (process.env.NOTION_TOKEN) cfg.token = process.env.NOTION_TOKEN;
 if (process.env.NOTION_PAGE_ID) cfg.pageId = process.env.NOTION_PAGE_ID;
-if (!cfg.token || (!cfg.pageId && !cfg.dbId)) { console.log("노션 token/page 없음 — 스킵"); process.exit(0); }
+if (!cfg.token || !cfg.pageId) { console.log("노션 token/pageId 없음 — 스킵"); process.exit(0); }
 const TOPN = Number((process.argv.find(a => a.startsWith("--top=")) || "").split("=")[1] || 300);
+const FORCE = process.argv.includes("--force");
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(D, f), "utf8")); } catch (e) { return d; } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const H = { "Authorization": "Bearer " + cfg.token, "Notion-Version": NV, "Content-Type": "application/json" };
 async function napi(method, url, body) {
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let a = 0; a < 5; a++) {
     const r = await fetch("https://api.notion.com/v1" + url, { method, headers: H, body: body ? JSON.stringify(body) : undefined });
-    if (r.status === 429) { await sleep(1500); continue; }   // rate limit → 대기 후 재시도
+    if (r.status === 429) { await sleep(1500); continue; }
     const j = await r.json();
     if (!r.ok) throw new Error(url + " " + r.status + " " + (j.message || ""));
     return j;
   }
-  throw new Error(url + " 429 재시도 초과");
+  throw new Error(url + " 429 초과");
 }
 const normName = s => String(s || "").replace(/\s*\[[^\]]*\]\s*$/, "").replace(/\s+/g, "");
 const UNIT = k => k === "novel" ? 100 : 320;
 const isoDate = () => new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+const won = n => Number(n || 0).toLocaleString();
 
-// 프론트 revenueFor와 동일 로직으로 '오늘' 매출순 계산
+// '오늘' 매출순(웹툰=코믹만) + 각 작품 comic pn
 function computeRanking() {
   const series = readJSON("series.json", { comic: {}, novel: {} });
   const sd = readJSON("series_details.json", {});
@@ -51,82 +51,99 @@ function computeRanking() {
   for (const id in (lookup.id || {})) {
     const info = lookup.id[id]; if (!info || !info[0]) continue;
     const name = info[0]; if (seen.has(name)) continue;
-    const cands = (idx[normName(name)] || []).map(c => ({ ...c, d: sd[c.pn] })).filter(x => x.kind === "comic" && x.d && x.d.dl && x.d.ep);   // 웹툰(코믹)만 — 웹소설 제외
+    const cands = (idx[normName(name)] || []).map(c => ({ ...c, d: sd[c.pn] })).filter(x => x.kind === "comic" && x.d && x.d.dl && x.d.ep);
     const best = cands[0]; if (!best) continue;
     const dl = C.parseDlNum(best.d.dl), wep = (details[id] && details[id].ep) || best.d.ep;
     if (!dl || !wep) continue;
     const total = dl * UNIT(best.kind) * 0.9 * 0.6;
     seen.add(name);
-    rows.push({ name, author: info[2] || "", total: Math.round(total), per: Math.round(total / wep), dl, ep: wep, kind: best.kind, adult: adultSet.has(best.pn) });
+    rows.push({ name, total: Math.round(total), per: Math.round(total / wep), dl, ep: wep, adult: adultSet.has(best.pn), pn: best.pn });
   }
   rows.sort((a, b) => b.total - a.total);
   rows.forEach((r, i) => r.rank = i + 1);
   return rows;
 }
-
-async function ensureDb() {
-  if (cfg.dbId) return cfg.dbId;
-  const db = await napi("POST", "/databases", {
-    parent: { type: "page_id", page_id: cfg.pageId },
-    title: [{ type: "text", text: { content: "매출순 누적 (매일 갱신)" } }],
-    properties: {
-      "작품": { title: {} },
-      "날짜": { date: {} },
-      "순위": { number: {} },
-      "총매출(원)": { number: { format: "number_with_commas" } },
-      "회차당(원)": { number: { format: "number_with_commas" } },
-      "다운수": { number: { format: "number_with_commas" } },
-      "회차수": { number: {} },
-      "종류": { select: { options: [{ name: "웹툰", color: "blue" }, { name: "웹소설", color: "green" }] } },
-      "성인": { checkbox: {} }
-    }
-  });
-  cfg.dbId = db.id; fs.writeFileSync(CFG, JSON.stringify(cfg, null, 2));
-  console.log("✅ 노션에 '매출순 누적' 표 생성됨");
-  return db.id;
+// revenue_history에서 특정 comic pn의 날짜별 [{date, dl, total}] (누적 기록 backfill용)
+function historyFor(revhist, pn) {
+  const w = revhist.works && revhist.works[pn]; if (!w) return [];
+  const dates = revhist.dates || [];
+  const out = [];
+  for (let i = 0; i < dates.length; i++) { const dl = w.dl[i]; if (dl == null) continue; out.push({ date: dates[i], dl, total: Math.round(dl * 320 * 0.9 * 0.6) }); }
+  return out;
 }
-async function alreadySynced(dbId, date) {
-  const j = await napi("POST", "/databases/" + dbId + "/query", { filter: { property: "날짜", date: { equals: date } }, page_size: 1 });
-  return (j.results || []).length > 0;
+const histLine = h => `${h.date} · 다운수 ${won(h.dl)} · 총매출 ${won(h.total)}원`;
+function props(r, date) {
+  return {
+    "작품": { title: [{ text: { content: r.name } }] },
+    "순위": { number: r.rank },
+    "다운수": { number: r.dl },
+    "총매출(원)": { number: r.total },
+    "회차당(원)": { number: r.per },
+    "회차수": { number: r.ep },
+    "성인": { checkbox: !!r.adult },
+    "갱신일": { date: { start: date } }
+  };
 }
-async function clearDate(dbId, date) {   // --force: 그날 기존 행 삭제 후 다시 채움
-  let cursor, ids = [];
-  do { const j = await napi("POST", "/databases/" + dbId + "/query", { filter: { property: "날짜", date: { equals: date } }, page_size: 100, start_cursor: cursor }); for (const p of (j.results || [])) ids.push(p.id); cursor = j.has_more ? j.next_cursor : null; } while (cursor);
-  console.log("기존 " + date + " " + ids.length + "행 삭제…");
-  for (const id of ids) { try { await napi("PATCH", "/pages/" + id, { archived: true }); } catch (e) {} await sleep(130); }
-}
-const FORCE = process.argv.includes("--force");
-
-(async () => {
-  if (!cfg.token || !cfg.pageId) { console.log("❌ .notion.json에 token/pageId 필요"); process.exit(1); }
-  const dbId = await ensureDb();
-  const date = isoDate();
-  const synced = await alreadySynced(dbId, date);
-  if (synced && !FORCE) { console.log(date + " 이미 노션에 있음 — 스킵 (다시채우려면 --force)"); return; }
-  if (synced && FORCE) await clearDate(dbId, date);
-  const rows = computeRanking().slice(0, TOPN);
-  console.log(date + " · 매출순 상위 " + rows.length + "개를 노션에 추가…");
-  let n = 0;
-  for (const r of rows) {
-    try {
-      await napi("POST", "/pages", {
-        parent: { database_id: dbId },
-        properties: {
-          "작품": { title: [{ text: { content: r.name } }] },
-          "날짜": { date: { start: date } },
-          "순위": { number: r.rank },
-          "총매출(원)": { number: r.total },
-          "회차당(원)": { number: r.per },
-          "다운수": { number: r.dl },
-          "회차수": { number: r.ep },
-          "종류": { select: { name: r.kind === "novel" ? "웹소설" : "웹툰" } },
-          "성인": { checkbox: !!r.adult }
-        }
-      });
-      n++;
-    } catch (e) { console.log("  행 실패:", r.name, e.message); }
-    if (n % 25 === 0 && n) console.log("  " + n + "/" + rows.length);
+async function appendBlocks(pageId, lines) {
+  for (let i = 0; i < lines.length; i += 90) {
+    const children = lines.slice(i, i + 90).map(t => ({ object: "block", type: "bulleted_list_item", bulleted_list_item: { rich_text: [{ text: { content: t } }] } }));
+    await napi("PATCH", "/blocks/" + pageId + "/children", { children });
     await sleep(340);
   }
-  console.log("🎉 완료: " + n + "개 추가 (" + date + ")");
+}
+async function ensureDb() {
+  if (cfg.dbId && cfg.schema === "v2") return cfg.dbId;
+  if (cfg.dbId) { try { await napi("PATCH", "/blocks/" + cfg.dbId, { archived: true }); console.log("이전 표 정리(보관처리)"); } catch (e) {} }
+  const db = await napi("POST", "/databases", {
+    parent: { type: "page_id", page_id: cfg.pageId },
+    title: [{ type: "text", text: { content: "매출순 (작품당 1행·페이지 안 누적)" } }],
+    properties: {
+      "작품": { title: {} }, "순위": { number: {} },
+      "다운수": { number: { format: "number_with_commas" } },
+      "총매출(원)": { number: { format: "number_with_commas" } },
+      "회차당(원)": { number: { format: "number_with_commas" } },
+      "회차수": { number: {} }, "성인": { checkbox: {} }, "갱신일": { date: {} }
+    }
+  });
+  cfg.dbId = db.id; cfg.schema = "v2"; fs.writeFileSync(CFG, JSON.stringify(cfg, null, 2));
+  console.log("✅ 새 표 생성 (작품당 1행 + 페이지 안 누적)");
+  return db.id;
+}
+async function loadRows(dbId) {
+  const map = {}; let cursor;
+  do {
+    const j = await napi("POST", "/databases/" + dbId + "/query", { page_size: 100, start_cursor: cursor });
+    for (const p of (j.results || [])) { const nm = p.properties["작품"].title[0]?.plain_text; const up = p.properties["갱신일"]?.date?.start; if (nm) map[nm] = { id: p.id, updated: up }; }
+    cursor = j.has_more ? j.next_cursor : null;
+  } while (cursor);
+  return map;
+}
+
+(async () => {
+  const dbId = await ensureDb();
+  const date = isoDate();
+  const rows = computeRanking().slice(0, TOPN);
+  const revhist = readJSON("revenue_history.json", { dates: [], works: {} });
+  const existing = await loadRows(dbId);
+  console.log(date + " · 매출순 상위 " + rows.length + "개 (기존 " + Object.keys(existing).length + "행) 갱신…");
+  let upd = 0, cre = 0;
+  for (const r of rows) {
+    try {
+      const ex = existing[r.name];
+      if (ex) {
+        await napi("PATCH", "/pages/" + ex.id, { properties: props(r, date) });
+        if (FORCE || ex.updated !== date) await appendBlocks(ex.id, [histLine({ date, dl: r.dl, total: r.total })]); // 오늘 기록 1줄(오늘 이미 있으면 스킵)
+        upd++;
+      } else {
+        const page = await napi("POST", "/pages", { parent: { database_id: dbId }, properties: props(r, date) });
+        const hist = historyFor(revhist, r.pn);
+        const lines = hist.length ? hist.map(histLine) : [histLine({ date, dl: r.dl, total: r.total })];
+        await appendBlocks(page.id, ["📈 날짜별 누적 기록", ...lines].slice(0, 100));
+        cre++;
+      }
+    } catch (e) { console.log("  실패:", r.name, e.message); }
+    if ((upd + cre) % 25 === 0) console.log("  " + (upd + cre) + "/" + rows.length);
+    await sleep(340);
+  }
+  console.log(`🎉 완료: 갱신 ${upd} · 신규 ${cre} (${date})`);
 })().catch(e => { console.error("FAILED:", e.message); process.exit(1); });
