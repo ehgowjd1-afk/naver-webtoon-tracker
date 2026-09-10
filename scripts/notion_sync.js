@@ -44,6 +44,7 @@ function lastChange(revhist, pn) {   // 전일대비 %: 기록된 최근 두 날
   const prev = vals[vals.length - 2], last = vals[vals.length - 1];
   return prev > 0 ? Math.round((last - prev) / prev * 1000) / 10 : null;
 }
+function tier(per) { return per >= 1e8 ? "1억원 이상" : per >= 5e7 ? "5천만~1억" : per >= 2e7 ? "2천만~5천만" : per >= 1e7 ? "1천만~2천만" : "1천만 미만"; }
 function computeRanking(revhist) {
   const series = readJSON("series.json", { comic: {}, novel: {} });
   const sd = readJSON("series_details.json", {});
@@ -82,6 +83,7 @@ function masterProps(r, date) {
     "작품": { title: [{ text: { content: r.name } }] },
     "순위": { number: r.rank },
     "회차당(원)": { number: r.per },
+    "회차당구간": { select: { name: tier(r.per) } },
     "총매출(원)": { number: r.total },
     "전일대비(%)": { number: r.change == null ? null : r.change },
     "다운수": { number: r.dl },
@@ -109,6 +111,7 @@ async function ensureDbs() {
     properties: {
       "작품": { title: {} }, "순위": { number: {} },
       "회차당(원)": { number: { format: "number_with_commas" } },
+      "회차당구간": { select: { options: [{ name: "1억원 이상", color: "red" }, { name: "5천만~1억", color: "orange" }, { name: "2천만~5천만", color: "yellow" }, { name: "1천만~2천만", color: "green" }, { name: "1천만 미만", color: "gray" }] } },
       "총매출(원)": { number: { format: "number_with_commas" } },
       "전일대비(%)": { number: {} },
       "다운수": { number: { format: "number_with_commas" } },
