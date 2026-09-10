@@ -20,6 +20,7 @@ if (process.env.NOTION_PAGE_ID) cfg.pageId = process.env.NOTION_PAGE_ID;
 if (!cfg.token || !cfg.pageId) { console.log("노션 token/pageId 없음 — 스킵"); process.exit(0); }
 const TOPN = Number((process.argv.find(a => a.startsWith("--top=")) || "").split("=")[1] || 300);
 const FORCE = process.argv.includes("--force");
+const REHIST = process.argv.includes("--rehist");   // 일별기록 전체 삭제 후 재작성(컬럼 추가 등 반영용)
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(D, f), "utf8")); } catch (e) { return d; } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const H = { "Authorization": "Bearer " + cfg.token, "Notion-Version": NV, "Content-Type": "application/json" };
@@ -74,9 +75,14 @@ function computeRanking(revhist) {
 // revenue_history에서 pn의 날짜별 [{date, dl, total, per}]  (per=총매출/현재 웹툰회차수, 근사)
 function historyFor(revhist, pn, ep) {
   const w = revhist.works && revhist.works[pn]; if (!w) return [];
-  const dates = revhist.dates || [], out = [];
-  for (let i = 0; i < dates.length; i++) { const dl = w.dl[i]; if (dl == null) continue; const total = Math.round(dl * 320 * 0.9 * 0.6); out.push({ date: dates[i], dl, total, per: ep ? Math.round(total / ep) : 0 }); }
+  const dates = revhist.dates || [], out = []; let prev = null;
+  for (let i = 0; i < dates.length; i++) { const dl = w.dl[i]; if (dl == null) continue; const total = Math.round(dl * 320 * 0.9 * 0.6); out.push({ date: dates[i], dl, total, per: ep ? Math.round(total / ep) : 0, ep, change: prev == null ? null : total - prev }); prev = total; }
   return out;
+}
+function withToday(hist, r, date) {   // 오늘치가 없으면 오늘(현재값) 추가(전일대비=어제 총매출과의 차)
+  if (hist.some(h => h.date === date)) return hist;
+  const lastT = hist.length ? hist[hist.length - 1].total : null;
+  return [...hist, { date, dl: r.dl, total: r.total, per: r.per, ep: r.ep, change: lastT == null ? null : r.total - lastT }];
 }
 function masterProps(r, date) {
   return {
@@ -98,8 +104,10 @@ function histProps(name, masterId, h) {
     "작품": { relation: [{ id: masterId }] },
     "날짜": { date: { start: h.date } },
     "회차당(원)": { number: h.per },
+    "전일대비(원)": { number: h.change == null ? null : h.change },
     "총매출(원)": { number: h.total },
-    "다운수": { number: h.dl }
+    "다운수": { number: h.dl },
+    "회차수": { number: h.ep || null }
   };
 }
 async function ensureDbs() {
@@ -125,8 +133,10 @@ async function ensureDbs() {
       "작품": { relation: { database_id: master.id, type: "dual_property", dual_property: {} } },
       "날짜": { date: {} },
       "회차당(원)": { number: { format: "number_with_commas" } },
+      "전일대비(원)": { number: { format: "number_with_commas" } },
       "총매출(원)": { number: { format: "number_with_commas" } },
-      "다운수": { number: { format: "number_with_commas" } }
+      "다운수": { number: { format: "number_with_commas" } },
+      "회차수": { number: {} }
     }
   });
   cfg.masterDbId = master.id; cfg.histDbId = hist.id; cfg.schema = SCHEMA; delete cfg.dbId;
@@ -149,6 +159,12 @@ async function loadMaster() {
   const revhist = readJSON("revenue_history.json", { dates: [], works: {} });
   const rows = computeRanking(revhist).slice(0, TOPN);
   const existing = await loadMaster();
+  if (REHIST) {   // 일별기록 전체 삭제(컬럼 추가/구조변경 반영 위해 재작성)
+    let cursor, ids = [];
+    do { const j = await napi("POST", "/databases/" + cfg.histDbId + "/query", { page_size: 100, start_cursor: cursor }); for (const p of (j.results || [])) ids.push(p.id); cursor = j.has_more ? j.next_cursor : null; } while (cursor);
+    console.log("기존 일별기록 " + ids.length + "행 삭제…");
+    for (const id of ids) { try { await napi("PATCH", "/pages/" + id, { archived: true }); } catch (e) {} await sleep(130); }
+  }
   console.log(date + " · 회차당 순 상위 " + rows.length + "개 (기존 " + Object.keys(existing).length + "행)…");
   let upd = 0, cre = 0, hrows = 0;
   for (const r of rows) {
@@ -159,8 +175,8 @@ async function loadMaster() {
       else { const page = await napi("POST", "/pages", { parent: { database_id: cfg.masterDbId }, properties: masterProps(r, date) }); masterId = page.id; wasUpdated = null; cre++; }
       // 일별기록: 신규작품은 과거+오늘 전부, 기존작품은 오늘치만(이미 오늘 했으면 스킵)
       let hist;
-      if (!ex) { hist = historyFor(revhist, r.pn, r.ep); if (!hist.some(h => h.date === date)) hist.push({ date, dl: r.dl, total: r.total, per: r.per }); }
-      else if (FORCE || wasUpdated !== date) { hist = [{ date, dl: r.dl, total: r.total, per: r.per }]; }
+      if (REHIST || !ex) { hist = withToday(historyFor(revhist, r.pn, r.ep), r, date); }
+      else if (FORCE || wasUpdated !== date) { const hs = historyFor(revhist, r.pn, r.ep); const lastT = hs.length ? hs[hs.length - 1].total : null; hist = [{ date, dl: r.dl, total: r.total, per: r.per, ep: r.ep, change: lastT == null ? null : r.total - lastT }]; }
       else hist = [];
       for (const h of hist) { await napi("POST", "/pages", { parent: { database_id: cfg.histDbId }, properties: histProps(r.name, masterId, h) }); hrows++; await sleep(340); }
     } catch (e) { console.log("  실패:", r.name, e.message); }
