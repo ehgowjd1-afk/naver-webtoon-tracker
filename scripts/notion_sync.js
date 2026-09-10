@@ -25,14 +25,20 @@ const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(D
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const H = { "Authorization": "Bearer " + cfg.token, "Notion-Version": NV, "Content-Type": "application/json" };
 async function napi(method, url, body) {
-  for (let a = 0; a < 5; a++) {
-    const r = await fetch("https://api.notion.com/v1" + url, { method, headers: H, body: body ? JSON.stringify(body) : undefined });
-    if (r.status === 429) { await sleep(1500); continue; }
-    const j = await r.json();
-    if (!r.ok) throw new Error(url + " " + r.status + " " + (j.message || ""));
-    return j;
+  let lastErr;
+  for (let a = 0; a < 6; a++) {
+    const ac = new AbortController();
+    const t = setTimeout(() => ac.abort(), 20000);   // 20초 넘게 응답 없으면 중단하고 재시도(무한 hang 방지)
+    try {
+      const r = await fetch("https://api.notion.com/v1" + url, { method, headers: H, body: body ? JSON.stringify(body) : undefined, signal: ac.signal });
+      clearTimeout(t);
+      if (r.status === 429 || r.status >= 500) { await sleep(1500); continue; }
+      const j = await r.json();
+      if (!r.ok) throw new Error(url + " " + r.status + " " + (j.message || ""));
+      return j;
+    } catch (e) { clearTimeout(t); lastErr = e; if (e.name === "AbortError") { console.log("  (응답 지연 재시도 " + (a + 1) + ") " + url); await sleep(1000); continue; } throw e; }
   }
-  throw new Error(url + " 429 초과");
+  throw new Error(url + " 재시도 초과 " + (lastErr && lastErr.message || ""));
 }
 const normName = s => String(s || "").replace(/\s*\[[^\]]*\]\s*$/, "").replace(/\s+/g, "");
 const UNIT = k => k === "novel" ? 100 : 320;
