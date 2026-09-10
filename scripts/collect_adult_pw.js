@@ -54,7 +54,8 @@ async function collectAll(page, opts = {}) {
   for (const n in extra.map) for (const e of extra.map[n]) pnKind[e.pn] = e.kind;
   for (const kind of ["comic", "novel"]) for (const pf of ["web", "mobile"]) for (const c in (series[kind] || {})[pf] || {}) for (const p in series[kind][pf][c]) for (const it of series[kind][pf][c][p]) if (!(it.id in pnKind)) pnKind[it.id] = kind;
   const adultSet = new Set(extra.adult);
-  let targets = [...new Set(Object.keys(pnKind).map(Number))].filter(pn => adultSet.has(pn) || !(sd[pn] && sd[pn].dl));
+  // 대상 = '네이버웹툰 성인작품'(코믹)만. 웹소설은 제외(웹툰이 아니므로). 성인목록 or 아직 dl없는 코믹(신작 성인 잡기).
+  let targets = [...new Set(Object.keys(pnKind).map(Number))].filter(pn => pnKind[pn] === "comic" && (adultSet.has(pn) || !(sd[pn] && sd[pn].dl)));
   // 오래 안 본 것부터(제일 stale 우선) — cap이 있으면 매 실행마다 조금씩 나눠서 부담 최소화
   targets.sort((a, b) => (extra.seen[a] || 0) - (extra.seen[b] || 0));
   if (targets.length > cap) targets = targets.slice(0, cap);
