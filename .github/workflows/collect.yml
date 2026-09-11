@@ -33,6 +33,6 @@ jobs:
           fi
           git commit -m "auto: 랭킹 자동수집 $(date -u +%Y-%m-%d)"
           for i in 1 2 3; do
-            git pull --rebase --autostash && git push && exit 0 || sleep 5
+            git pull --rebase --autostash -X theirs && git push && exit 0 || (git rebase --abort 2>/dev/null; sleep 5)
           done
           echo "push 실패"; exit 1
