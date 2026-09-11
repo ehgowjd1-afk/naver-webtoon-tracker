@@ -5,8 +5,6 @@ cd /d "%~dp0.."
 set NODE_EXE=C:\Program Files\nodejs\node.exe
 if not exist "%NODE_EXE%" set NODE_EXE=node
 "%NODE_EXE%" scripts\collect_local.js --push >> scripts\local_last_run.log 2>&1
-REM 성인 다운수: 켜둔 디버그 크롬(chrome_debug.bat로 로그인+연령확인)에 붙어 매일 '전체' 갱신.
-REM 크롬이 꺼져있거나 세션 만료면 자동 스킵(에러 아님). 보호조치 뜨면 --max를 줄이세요.
-"%NODE_EXE%" scripts\collect_adult_pw.js --cdp --push --max=1000 >> scripts\local_last_run.log 2>&1
+REM 성인 다운수는 별도 작업('웹툰 성인수집 재시도')이 하루 여러번 시도(연령확인되면 그때 수집·이미했으면 스킵).
 REM 노션에 매출순 상위 300개 그날 데이터 추가(누적). 노션 설정(.notion.json) 없으면 자동 스킵.
 "%NODE_EXE%" scripts\notion_sync.js --top=300 >> scripts\local_last_run.log 2>&1

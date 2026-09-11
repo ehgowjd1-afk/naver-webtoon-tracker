@@ -72,6 +72,7 @@ async function collectAll(page, opts = {}) {
     await sleep(dmin + Math.floor(Math.random() * Math.max(0, dmax - dmin)));
   }
   extra.adult = [...adultSet];
+  if (got > 0) extra.cdpDate = C.isoDate();   // 오늘 성인 수집 완료 표시(하루 여러번 시도해도 1번만 수집)
   fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd));
   fs.writeFileSync(path.join(D, "series_extra.json"), JSON.stringify(extra));
   const rh = C.updateRevenueHistory(D, C.isoDate());
@@ -88,7 +89,8 @@ async function collectAll(page, opts = {}) {
     const context = browser.contexts()[0] || await browser.newContext();
     const page = context.pages()[0] || await context.newPage();
     if (PUSH) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); } catch (e) {} }
-    if (!(await adultOk(context))) { console.log("❌ 그 크롬에서 성인 접근이 안 돼요 — 네이버 로그인 + 19금 작품 '연령확인'부터 사람이 직접 해주세요."); await browser.close(); process.exit(2); }
+    if (readJSON("series_extra.json", {}).cdpDate === C.isoDate()) { console.log("✅ 오늘 이미 성인 수집 완료 — 스킵(하루 1번)"); await browser.close(); return; }
+    if (!(await adultOk(context))) { console.log("❌ 아직 성인 접근 안 됨(연령확인 대기) — 다음 재시도 때 다시 시도합니다."); await browser.close(); process.exit(2); }
     console.log(`✅ 진짜 크롬 세션으로 성인 접근 OK — 최대 ${MAX}개 수집(2~4.5초 간격)`);
     const got = await collectAll(page, { cap: MAX, dmin: 2000, dmax: 4500 }); // 매일 전체 갱신용(적당히 천천히)
     await browser.close(); // CDP는 disconnect만 (사용자 크롬은 그대로 열려있음)
