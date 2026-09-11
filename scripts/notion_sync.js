@@ -23,6 +23,9 @@ const FORCE = process.argv.includes("--force");
 const REHIST = process.argv.includes("--rehist");   // 일별기록 전체 삭제 후 재작성(컬럼 추가 등 반영용)
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(D, f), "utf8")); } catch (e) { return d; } };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const TBLF = path.join(__dirname, ".notion_tables.json");   // {페이지id: {tid:표블록id, last:마지막추가날짜}} — git 제외
+let tables = {}; try { tables = JSON.parse(fs.readFileSync(TBLF, "utf8")); } catch (e) {}
+const saveTables = () => { try { fs.writeFileSync(TBLF, JSON.stringify(tables)); } catch (e) {} };
 const H = { "Authorization": "Bearer " + cfg.token, "Notion-Version": NV, "Content-Type": "application/json" };
 async function napi(method, url, body) {
   let lastErr;
@@ -79,16 +82,16 @@ function computeRanking(revhist) {
   return rows;
 }
 // revenue_history에서 pn의 날짜별 [{date, dl, total, per}]  (per=총매출/현재 웹툰회차수, 근사)
-function historyFor(revhist, pn, ep) {
+function historyFor(revhist, pn, ep) {   // change = '회차당' 전일대비 증감(원). ep 고정이라 회차당=총매출/ep
   const w = revhist.works && revhist.works[pn]; if (!w) return [];
-  const dates = revhist.dates || [], out = []; let prev = null;
-  for (let i = 0; i < dates.length; i++) { const dl = w.dl[i]; if (dl == null) continue; const total = Math.round(dl * 320 * 0.9 * 0.6); out.push({ date: dates[i], dl, total, per: ep ? Math.round(total / ep) : 0, ep, change: prev == null ? null : total - prev }); prev = total; }
+  const dates = revhist.dates || [], out = []; let prevPer = null;
+  for (let i = 0; i < dates.length; i++) { const dl = w.dl[i]; if (dl == null) continue; const total = Math.round(dl * 320 * 0.9 * 0.6); const per = ep ? Math.round(total / ep) : 0; out.push({ date: dates[i], dl, total, per, ep, change: prevPer == null ? null : per - prevPer }); prevPer = per; }
   return out;
 }
-function withToday(hist, r, date) {   // 오늘치가 없으면 오늘(현재값) 추가(전일대비=어제 총매출과의 차)
+function withToday(hist, r, date) {   // 오늘치가 없으면 오늘(현재값) 추가(전일대비=어제 회차당과의 차)
   if (hist.some(h => h.date === date)) return hist;
-  const lastT = hist.length ? hist[hist.length - 1].total : null;
-  return [...hist, { date, dl: r.dl, total: r.total, per: r.per, ep: r.ep, change: lastT == null ? null : r.total - lastT }];
+  const lastPer = hist.length ? hist[hist.length - 1].per : null;
+  return [...hist, { date, dl: r.dl, total: r.total, per: r.per, ep: r.ep, change: lastPer == null ? null : r.per - lastPer }];
 }
 function masterProps(r, date) {
   return {
@@ -115,6 +118,43 @@ function histProps(name, masterId, h) {
     "다운수": { number: h.dl },
     "회차수": { number: h.ep || null }
   };
+}
+
+// ── 작품 페이지 안에 넣는 '날짜별 기록' 표(네이티브 표 블록) ──────────────
+const comma = n => Number(n).toLocaleString("en-US");
+const cell = (txt, color) => [{ type: "text", text: { content: String(txt) }, ...(color ? { annotations: { color } } : {}) }];
+const headerRow = { type: "table_row", table_row: { cells: [cell("날짜"), cell("회차당"), cell("전일대비"), cell("회차수"), cell("다운수")] } };
+function tableRow(h) {   // 전일대비: ▲상승=빨강, ▼하락=파랑 (한국 관행)
+  const chg = h.change == null ? cell("—", "gray") : h.change > 0 ? cell("▲" + comma(h.change), "red") : h.change < 0 ? cell("▼" + comma(-h.change), "blue") : cell("0", "gray");
+  return { type: "table_row", table_row: { cells: [cell(h.date), cell(comma(h.per)), chg, cell(h.ep == null ? "—" : h.ep), cell(comma(h.dl))] } };
+}
+async function pageChildren(pid) { const out = []; let c; do { const j = await napi("GET", "/blocks/" + pid + "/children?page_size=100" + (c ? "&start_cursor=" + c : "")); out.push(...(j.results || [])); c = j.has_more ? j.next_cursor : null; } while (c); return out; }
+async function clearOurBlocks(pid) {   // 우리가 넣은 heading('📅…')·표만 지움(사용자 다른 내용 보존)
+  for (const b of await pageChildren(pid)) {
+    const ours = b.type === "table" || (b.type === "heading_3" && ((b.heading_3.rich_text[0] || {}).plain_text || "").startsWith("📅"));
+    if (ours) { try { await napi("PATCH", "/blocks/" + b.id, { archived: true }); } catch (e) {} await sleep(160); }
+  }
+}
+async function buildTable(pid, hist) {
+  await clearOurBlocks(pid);
+  const rows = hist.slice(-99).map(tableRow);   // 표 블록은 한 번에 최대 100행 → 최근 99일 + 헤더
+  const res = await napi("PATCH", "/blocks/" + pid + "/children", {
+    children: [
+      { object: "block", type: "heading_3", heading_3: { rich_text: [{ type: "text", text: { content: "📅 날짜별 기록" } }] } },
+      { object: "block", type: "table", table: { table_width: 5, has_column_header: true, has_row_header: false, children: [headerRow, ...rows] } }
+    ]
+  });
+  const tbl = (res.results || []).find(b => b.type === "table");
+  return tbl ? tbl.id : null;
+}
+async function syncTable(pid, hist, date) {   // 신규/재작성=통째로, 그 외=쌓인 날짜만 추가
+  if (!hist.length) return "empty";
+  const last = hist[hist.length - 1].date, st = tables[pid];
+  if (REHIST || !st || !st.tid) { const tid = await buildTable(pid, hist); if (tid) tables[pid] = { tid, last }; return "build"; }
+  const newRows = hist.filter(h => h.date > st.last);
+  if (!newRows.length) return "skip";
+  try { await napi("PATCH", "/blocks/" + st.tid + "/children", { children: newRows.map(tableRow) }); st.last = last; return "append"; }
+  catch (e) { const tid = await buildTable(pid, hist); if (tid) tables[pid] = { tid, last }; return "rebuild"; }
 }
 async function ensureDbs() {
   if (cfg.masterDbId && cfg.histDbId && cfg.schema === SCHEMA) return;
@@ -172,7 +212,7 @@ async function loadMaster() {
     for (const id of ids) { try { await napi("PATCH", "/pages/" + id, { archived: true }); } catch (e) {} await sleep(130); }
   }
   console.log(date + " · 회차당 순 상위 " + rows.length + "개 (기존 " + Object.keys(existing).length + "행)…");
-  let upd = 0, cre = 0, hrows = 0;
+  let upd = 0, cre = 0, hrows = 0, tbuilt = 0, tapp = 0;
   for (const r of rows) {
     try {
       const ex = existing[r.name];
@@ -185,9 +225,14 @@ async function loadMaster() {
       else if (FORCE || wasUpdated !== date) { const hs = historyFor(revhist, r.pn, r.ep); const lastT = hs.length ? hs[hs.length - 1].total : null; hist = [{ date, dl: r.dl, total: r.total, per: r.per, ep: r.ep, change: lastT == null ? null : r.total - lastT }]; }
       else hist = [];
       for (const h of hist) { await napi("POST", "/pages", { parent: { database_id: cfg.histDbId }, properties: histProps(r.name, masterId, h) }); hrows++; await sleep(340); }
+      // 작품 페이지 안에 '날짜별 기록' 표(전 기간) 반영
+      const fullHist = withToday(historyFor(revhist, r.pn, r.ep), r, date);
+      const act = await syncTable(masterId, fullHist, date);
+      if (act === "build" || act === "rebuild") tbuilt++; else if (act === "append") tapp++;
     } catch (e) { console.log("  실패:", r.name, e.message); }
-    if ((upd + cre) % 25 === 0) console.log("  " + (upd + cre) + "/" + rows.length + " (기록행 " + hrows + ")");
+    if ((upd + cre) % 25 === 0) { console.log("  " + (upd + cre) + "/" + rows.length + " (기록행 " + hrows + " · 표 신규" + tbuilt + "/추가" + tapp + ")"); saveTables(); }
     await sleep(340);
   }
-  console.log(`🎉 완료: 매출순 갱신 ${upd}·신규 ${cre} · 일별기록 ${hrows}행 (${date})`);
+  saveTables();
+  console.log(`🎉 완료: 매출순 갱신 ${upd}·신규 ${cre} · 일별기록 ${hrows}행 · 페이지내 표 신규 ${tbuilt}·추가 ${tapp} (${date})`);
 })().catch(e => { console.error("FAILED:", e.message); process.exit(1); });

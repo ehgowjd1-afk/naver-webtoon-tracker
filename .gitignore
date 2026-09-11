@@ -9,3 +9,4 @@ scripts/.pw-realprofile/
 scripts/.pw-state.json
 package-lock.json
 scripts/.notion.json
+scripts/.notion_tables.json
