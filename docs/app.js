@@ -139,14 +139,21 @@ function revSeriesFor(name, epOverride){
 }
 /* 그 날짜가 속한 주(월~일)의 월요일 (YYYY-MM-DD) */
 function weekMonday(dtStr){ const p=(dtStr||"").split("-").map(Number); const dt=new Date(p[0],p[1]-1,p[2]); const dow=(dt.getDay()+6)%7; dt.setDate(dt.getDate()-dow); return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0"); }
-/* 회차당 매출 주간(월~일) 전주 대비 변동: 이번 주 대표값(그 주 마지막 기록) − 전주 대표값 */
+/* 회차당 매출 주간(월~일) 전주 대비 변동. 다운수↑뿐 아니라 회차수↑도 반영(회차 늘면 회차당 하락 가능).
+   전주 회차수 ≈ 현재 웹툰 총N화 − 그 사이 늘어난 회차수(REVHIST의 시리즈 회차수 증가분을 프록시로). 이번주 회차당은 매출순 탭과 동일 기준. */
 function weeklyPerChange(name, epOverride){
-  const rs=revSeriesFor(name, epOverride); if(!rs) return null;
-  const has=rs.has; if(!has.length) return null;
-  const rep={}; for(const p of has){ rep[weekMonday(p.dt)]=p; }        // 주별 마지막(최신) 기록
+  const rv=revenueFor(name); if(!rv||!REVHIST||!REVHIST.works) return null;
+  const w=REVHIST.works[rv.pn]; if(!w) return null;
+  const dates=REVHIST.dates||[], price=UNIT_PRICE(rv.kind);
+  const epNow = epOverride>0?epOverride:(rv.ep||1);                    // 현재 웹툰 총N화
+  const rep={}; dates.forEach((dt,i)=>{ if(w.dl[i]!=null && w.ep[i]!=null && w.ep[i]) rep[weekMonday(dt)]=i; });  // 주별 마지막 기록 인덱스
   const wks=Object.keys(rep).sort(); if(wks.length<2) return null;      // 이번주+전주 최소 2주 필요
-  const cur=rep[wks[wks.length-1]], prev=rep[wks[wks.length-2]];
-  return { now:cur.per, prev:prev.per, delta:cur.per-prev.per, nowDeal:cur.deal, nowTotal:cur.total, curWk:wks[wks.length-1], prevWk:wks[wks.length-2] };
+  const iCur=rep[wks[wks.length-1]], iPrev=rep[wks[wks.length-2]];
+  const epDelta=(w.ep[iCur]||0)-(w.ep[iPrev]||0);                       // 그 사이 늘어난 회차수(시리즈 기준)
+  const epPrev=Math.max(1, epNow-epDelta);                             // 전주 웹툰 회차수 ≈ 현재 − 증가분
+  const k=price*0.9*0.6;
+  const now=w.dl[iCur]*k/epNow, prev=w.dl[iPrev]*k/epPrev;
+  return { now, prev, delta:now-prev, nowDeal:w.dl[iCur]*320/epNow, epNow, epPrev, epDelta, dlNow:w.dl[iCur], dlPrev:w.dl[iPrev], curWk:wks[wks.length-1], prevWk:wks[wks.length-2] };
 }
 /* 매출 누적 이중 라인 차트(총매출·회차당) — 각 지표 자체 스케일, 축은 하나씩(이중축 아님) */
 function revChartHtml(name, epOverride){
@@ -167,8 +174,9 @@ function revChartHtml(name, epOverride){
   const chg=(a,b)=> b===a?"±0":(b>a?"▲":"▼")+wonFmt(Math.abs(b-a));
   const range=`${rs.has[0].dt.slice(5)}~${lastP.dt.slice(5)} · ${n}일`;
   const wc=weeklyPerChange(name, epOverride);
+  const epNote = wc && wc.epDelta>0 ? ` · <b>회차 +${wc.epDelta}화</b>(${wc.epPrev}→${wc.epNow})` : "";
   const wcBanner = wc
-    ? `<div class="mwc ${wc.delta>0?"rc-up":wc.delta<0?"rc-down":"rc-same"}"><span class="mwclab">📊 회차당 전주(월~일) 대비</span><span class="mwcval">${wc.delta>0?"▲":wc.delta<0?"▼":"±"}${wonFmt(Math.abs(wc.delta))}</span><span class="mwcsub">이번주 ${wonFmt(wc.now)} · 전주 ${wonFmt(wc.prev)}</span></div>`
+    ? `<div class="mwc ${wc.delta>0?"rc-up":wc.delta<0?"rc-down":"rc-same"}"><span class="mwclab">📊 회차당 전주(월~일) 대비</span><span class="mwcval">${wc.delta>0?"▲":wc.delta<0?"▼":"±"}${wonFmt(Math.abs(wc.delta))}</span><span class="mwcsub">이번주 ${wonFmt(wc.now)} · 전주 ${wonFmt(wc.prev)}${epNote}</span></div>`
     : `<div class="mwc rc-same"><span class="mwclab">📊 회차당 전주 대비</span><span class="mwcsub">2주차부터 표시돼요 (월~일 기준)</span></div>`;
   return `<div class="mrevbox">
     <div class="mrevhd"><span class="mrevt">💰 매출 누적</span><span class="mrevn">${range}</span></div>
@@ -407,7 +415,8 @@ function revChangeHtml(d){
   const up=wc.delta>0, dn=wc.delta<0;
   const cls=up?"rc-up":dn?"rc-down":"rc-same";
   const big=(!up&&!dn)?"±0원":(up?"▲":"▼")+wonFmt(Math.abs(wc.delta));
-  return `<div class="rev rc ${cls}" title="이번주 회차당 ${wonFmt(wc.now)} · 전주 ${wonFmt(wc.prev)}"><span class="rev-full">${big}</span><span class="rev-per">회차당 ${wonFmt(wc.now)}</span></div>`;
+  const epTxt = wc.epDelta>0 ? ` · 회차 +${wc.epDelta}` : "";
+  return `<div class="rev rc ${cls}" title="이번주 회차당 ${wonFmt(wc.now)} · 전주 ${wonFmt(wc.prev)}${wc.epDelta>0?` · 회차 ${wc.epPrev}→${wc.epNow}`:""}"><span class="rev-full">${big}</span><span class="rev-per">회차당 ${wonFmt(wc.now)}${epTxt}</span></div>`;
 }
 
 const searchUrl = t => `https://search.naver.com/search.naver?query=${encodeURIComponent(t+" 웹툰")}`;
