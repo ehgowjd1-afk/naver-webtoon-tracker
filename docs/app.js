@@ -50,8 +50,8 @@ const SOURCES = {
   genre:   { label:"장르", variants:[["app","모바일"],["web","웹"]], subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE[v]&&GENRE[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(GENRE.date)} · 장르별 인기순 · ${v==="app"?"모바일":"웹(PC)"} · 자동` },
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][platform]&&SERIES[v][platform][scat]&&SERIES[v][platform][scat][s], caps:{move:1,tiles:1,series:1,badge:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · ${platform==="web"?"웹(PC)":"모바일"} · ${scat} · 자동` },
   promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_MIN, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
-  revenue: { label:"매출순", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revenue:1,badge:1}, filters:F_MIN, sorts:[["per","회차당순"],["total","총매출순"],["deal","거래액순"]], note:()=>`시리즈 매출 추정 · 회차당·총매출·거래액 · 총매출=다운수×320×0.9×0.6 · 거래액=다운수×320÷회차` },
-  revchange:{ label:"매출 변동", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revchange:1,badge:1}, filters:F_MIN, sorts:[["gain","상승순"],["loss","하락순"]], note:()=>`회차당 매출 전주(월~일) 대비 변동 · 상승 큰 순` },
+  revenue: { label:"매출순", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revenue:1,badge:1}, filters:F_MIN, sorts:[["per","회차당순"],["total","총매출순"],["deal","거래액순"]], note:()=>`시리즈 매출 추정 · 회차당·총매출·거래액 · 총매출=다운수×320×0.9×0.6 · 회차당·거래액=÷시리즈 회차수` },
+  revchange:{ label:"매출 변동", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revchange:1,badge:1}, filters:F_MIN, sorts:[["gain","상승순"],["loss","하락순"]], note:()=>`회차당 매출 전주 대비 변동(연재요일 주간) · 상승 큰 순` },
   newworks:{ label:"신작", variants:null, subs:()=>NEWSUBS, data:(v,s)=>newWorkSet(+s), caps:{revenue:1,badge:1,newworks:1}, filters:F_MIN, sorts:[["recent","최신순"],["per","회차당순"],["total","총매출순"]], note:s=>`런칭 최근 ${s}일 신작 · ${s}일 지나면 이 목록에서만 빠지고 데이터는 계속 쌓여요` },
 };
 const REVSUBS=[["전체","전체"],["adult","🔞성인"],["dailyplus","매일+"],["mon","월"],["tue","화"],["wed","수"],["thu","목"],["fri","금"],["sat","토"],["sun","일"]];
@@ -137,30 +137,29 @@ function revSeriesFor(name, epOverride){
   const has=pts.filter(p=>p.total!=null);
   return { pts, has, kind:rv.kind };
 }
-/* 그 날짜가 속한 주(월~일)의 월요일 (YYYY-MM-DD) */
-function weekMonday(dtStr){ const p=(dtStr||"").split("-").map(Number); const dt=new Date(p[0],p[1]-1,p[2]); const dow=(dt.getDay()+6)%7; dt.setDate(dt.getDate()-dow); return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0"); }
-/* 회차당 매출 주간(월~일) 전주 대비 변동. 다운수↑뿐 아니라 회차수↑도 반영(회차 늘면 회차당 하락 가능).
-   전주 회차수 ≈ 현재 웹툰 총N화 − 그 사이 늘어난 회차수(REVHIST의 시리즈 회차수 증가분을 프록시로). 이번주 회차당은 매출순 탭과 동일 기준. */
-function weeklyPerChange(name, epOverride){
+/* 연재요일 매핑 + 그 날짜가 속한 '연재요일 시작 주'의 시작일(YYYY-MM-DD). dow: 0=월..6=일 */
+const DOW_KO={"월":0,"화":1,"수":2,"목":3,"금":4,"토":5,"일":6};
+function parseDow(dayStr){ const m=String(dayStr||"").match(/[월화수목금토일]/); return m?DOW_KO[m[0]]:0; }   // 첫 연재요일(없으면 월=0)
+const dowOf = d => parseDow(DETAILS && d && d.id!=null && DETAILS[d.id] ? DETAILS[d.id].day : "");
+function weekStart(dtStr, dow){ dow=dow||0; const p=(dtStr||"").split("-").map(Number); const dt=new Date(p[0],p[1]-1,p[2]); const cur=(dt.getDay()+6)%7; let diff=cur-dow; if(diff<0) diff+=7; dt.setDate(dt.getDate()-diff); return dt.getFullYear()+"-"+String(dt.getMonth()+1).padStart(2,"0")+"-"+String(dt.getDate()).padStart(2,"0"); }
+/* 회차당 매출 주간 전주 대비 변동. 주간 경계 = 각 작품 연재요일(dow). 회차수 = 시리즈 회차수(REVHIST의 w.ep, 날짜별 실측) → 회차 증가(시즌2 배치 포함)로 인한 하락 정확 반영 */
+function weeklyPerChange(name, dow){
   const rv=revenueFor(name); if(!rv||!REVHIST||!REVHIST.works) return null;
   const w=REVHIST.works[rv.pn]; if(!w) return null;
   const dates=REVHIST.dates||[], price=UNIT_PRICE(rv.kind);
-  const epNow = epOverride>0?epOverride:(rv.ep||1);                    // 현재 웹툰 총N화
-  const rep={}; dates.forEach((dt,i)=>{ if(w.dl[i]!=null && w.ep[i]!=null && w.ep[i]) rep[weekMonday(dt)]=i; });  // 주별 마지막 기록 인덱스
+  const rep={}; dates.forEach((dt,i)=>{ if(w.dl[i]!=null && w.ep[i]!=null && w.ep[i]) rep[weekStart(dt,dow)]=i; });  // 연재요일 주별 마지막 기록
   const wks=Object.keys(rep).sort(); if(wks.length<2) return null;      // 이번주+전주 최소 2주 필요
   const iCur=rep[wks[wks.length-1]], iPrev=rep[wks[wks.length-2]];
-  const epDelta=(w.ep[iCur]||0)-(w.ep[iPrev]||0);                       // 그 사이 늘어난 회차수(시리즈 기준)
-  const epPrev=Math.max(1, epNow-epDelta);                             // 전주 웹툰 회차수 ≈ 현재 − 증가분
-  const k=price*0.9*0.6;
-  const now=w.dl[iCur]*k/epNow, prev=w.dl[iPrev]*k/epPrev;
-  return { now, prev, delta:now-prev, nowDeal:w.dl[iCur]*320/epNow, epNow, epPrev, epDelta, dlNow:w.dl[iCur], dlPrev:w.dl[iPrev], curWk:wks[wks.length-1], prevWk:wks[wks.length-2] };
+  const epCur=w.ep[iCur], epPrev=w.ep[iPrev], k=price*0.9*0.6;          // 시리즈 회차수(각 주 실측)
+  const now=w.dl[iCur]*k/epCur, prev=w.dl[iPrev]*k/epPrev;
+  return { now, prev, delta:now-prev, nowDeal:w.dl[iCur]*320/epCur, epNow:epCur, epPrev, epDelta:epCur-epPrev, dlNow:w.dl[iCur], dlPrev:w.dl[iPrev], curWk:wks[wks.length-1], prevWk:wks[wks.length-2] };
 }
 /* 매출 누적 이중 라인 차트(총매출·회차당) — 각 지표 자체 스케일, 축은 하나씩(이중축 아님) */
-function revChartHtml(name, epOverride){
-  const rs=revSeriesFor(name, epOverride);
+function revChartHtml(name, dow){
+  const rs=revSeriesFor(name, 0);
   if(!rs) return "";
   const n=rs.has.length;
-  if(n<2){ return `<div class="mrevbox"><div class="mrevhd"><span class="mrevt">💰 매출 누적</span><span class="mrevn">${n?"1일차 · 내일부터 그래프가 그려져요":"수집 시작 전"}</span></div><div class="mrevempty">매일 새벽 자동으로 다운수·회차수를 기록해 총매출·회차당 매출 변화를 쌓아갑니다. ${n?"오늘 첫 기록 완료 ✓":""}</div>${n?`<button class="mepbtn" data-rev="1" data-name="${esc(name)}" data-ep="${epOverride||0}">⬇ 매출 누적 엑셀</button>`:""}</div>`; }
+  if(n<2){ return `<div class="mrevbox"><div class="mrevhd"><span class="mrevt">💰 매출 누적</span><span class="mrevn">${n?"1일차 · 내일부터 그래프가 그려져요":"수집 시작 전"}</span></div><div class="mrevempty">매일 새벽 자동으로 다운수·회차수를 기록해 총매출·회차당 매출 변화를 쌓아갑니다. ${n?"오늘 첫 기록 완료 ✓":""}</div>${n?`<button class="mepbtn" data-rev="1" data-name="${esc(name)}" data-ep="0">⬇ 매출 누적 엑셀</button>`:""}</div>`; }
   const mkLine=(vals,color)=>{
     const W=280,H=64,pad=6, xs=v=>pad+(v/(rs.pts.length-1||1))*(W-2*pad);
     const idx=rs.pts.map((p,i)=>[i,p]).filter(x=>x[1].total!=null);
@@ -173,11 +172,11 @@ function revChartHtml(name, epOverride){
   const first=rs.has[0], lastP=rs.has[n-1];
   const chg=(a,b)=> b===a?"±0":(b>a?"▲":"▼")+wonFmt(Math.abs(b-a));
   const range=`${rs.has[0].dt.slice(5)}~${lastP.dt.slice(5)} · ${n}일`;
-  const wc=weeklyPerChange(name, epOverride);
-  const epNote = wc && wc.epDelta>0 ? ` · <b>회차 +${wc.epDelta}화</b>(${wc.epPrev}→${wc.epNow})` : "";
+  const wc=weeklyPerChange(name, dow);
+  const epNote = wc && wc.epDelta!==0 ? ` · <b>회차 ${wc.epDelta>0?"+":""}${wc.epDelta}화</b>(${wc.epPrev}→${wc.epNow})` : "";
   const wcBanner = wc
-    ? `<div class="mwc ${wc.delta>0?"rc-up":wc.delta<0?"rc-down":"rc-same"}"><span class="mwclab">📊 회차당 전주(월~일) 대비</span><span class="mwcval">${wc.delta>0?"▲":wc.delta<0?"▼":"±"}${wonFmt(Math.abs(wc.delta))}</span><span class="mwcsub">이번주 ${wonFmt(wc.now)} · 전주 ${wonFmt(wc.prev)}${epNote}</span></div>`
-    : `<div class="mwc rc-same"><span class="mwclab">📊 회차당 전주 대비</span><span class="mwcsub">2주차부터 표시돼요 (월~일 기준)</span></div>`;
+    ? `<div class="mwc ${wc.delta>0?"rc-up":wc.delta<0?"rc-down":"rc-same"}"><span class="mwclab">📊 회차당 전주 대비(연재요일 기준)</span><span class="mwcval">${wc.delta>0?"▲":wc.delta<0?"▼":"±"}${wonFmt(Math.abs(wc.delta))}</span><span class="mwcsub">이번주 ${wonFmt(wc.now)} · 전주 ${wonFmt(wc.prev)}${epNote}</span></div>`
+    : `<div class="mwc rc-same"><span class="mwclab">📊 회차당 전주 대비</span><span class="mwcsub">2주차부터 표시돼요 (연재요일 기준)</span></div>`;
   return `<div class="mrevbox">
     <div class="mrevhd"><span class="mrevt">💰 매출 누적</span><span class="mrevn">${range}</span></div>
     ${wcBanner}
@@ -187,7 +186,7 @@ function revChartHtml(name, epOverride){
     ${mkLine(p=>p.per,"var(--down)")}
     <div class="mrevrow"><div class="mrevlab"><i style="background:var(--up)"></i>거래액</div><div class="mrevval">${wonFmt(lastP.deal)} <small>${chg(first.deal,lastP.deal)}</small></div></div>
     ${mkLine(p=>p.deal,"var(--up)")}
-    <button class="mepbtn" data-rev="1" data-name="${esc(name)}" data-ep="${epOverride||0}">⬇ 매출 누적 엑셀</button>
+    <button class="mepbtn" data-rev="1" data-name="${esc(name)}" data-ep="0">⬇ 매출 누적 엑셀</button>
   </div>`;
 }
 /* 매출 누적 엑셀: 날짜별 다운수·회차수·총매출·회차당 */
@@ -363,7 +362,7 @@ function renderList(){
     return true;
   });
   if(caps.revchange){
-    rows=rows.map(d=>{ d._wc=weeklyPerChange(d.name, detEp(d)); return d; }).filter(d=>d._wc);
+    rows=rows.map(d=>{ d._wc=weeklyPerChange(d.name, dowOf(d)); return d; }).filter(d=>d._wc);
     rows=[...rows].sort((a,b)=> sMode==="loss" ? (a._wc.delta-b._wc.delta) : (b._wc.delta-a._wc.delta));
     rows.forEach((d,i)=>{ d._rk=i+1; });
   }
@@ -374,7 +373,7 @@ function renderList(){
   }
   else if(caps.revenue || sMode==="revenue" || sMode==="per" || sMode==="total" || sMode==="deal"){
     const key = sMode==="total" ? "full" : sMode==="deal" ? "deal" : "per";
-    rows=[...rows].sort((a,b)=>{ const ra=revenueFor(a.name,detEp(a)),rb=revenueFor(b.name,detEp(b)); return (rb?rb[key]:-1)-(ra?ra[key]:-1); });
+    rows=[...rows].sort((a,b)=>{ const ra=revenueFor(a.name),rb=revenueFor(b.name); return (rb?rb[key]:-1)-(ra?ra[key]:-1); });
     if(caps.revenue) rows.forEach((d,i)=>{ d._rk=i+1; });
   }
   else if(sMode==="up") rows=[...rows].sort((a,b)=>b.m-a.m);
@@ -384,8 +383,8 @@ function renderList(){
   const countEl=document.getElementById("count"), board=document.getElementById("board");
   const total=(SOURCES[src].data(variant,sub)||[]).length;
   const revNote = caps.revchange
-    ? `회차당 매출 <b>전주(월~일) 대비</b> 변동 · <span style="color:var(--up)">▲상승</span> <span style="color:var(--down)">▼하락</span>`
-    : `회차당 = 총매출÷웹툰 총회차수 · 총매출 = 다운수×320×0.9×0.6 · 거래액 = 다운수×320÷회차`;
+    ? `회차당 매출 <b>전주 대비</b> 변동(연재요일 주간) · <span style="color:var(--up)">▲상승</span> <span style="color:var(--down)">▼하락</span>`
+    : `회차당 = 총매출÷시리즈 회차수 · 총매출 = 다운수×320×0.9×0.6 · 거래액 = 다운수×320÷시리즈 회차수`;
   countEl.innerHTML=`${rows.length}개 작품`+(fMode!=="all"||query?` (${subLabel(sub)} ${total}개 중)`:"")+((sMode==="revenue"||caps.revenue||caps.revchange)?` · <span style="color:var(--faint)">${revNote}</span>`:"");
   if(!rows.length){ board.innerHTML=`<li class="empty">${caps.revchange?"전주 대비 변동을 계산할 데이터가 아직 부족해요 (2주차부터).":"조건에 맞는 작품이 없어요."}</li>`; return; }
   const showRev = caps.revenue || sMode==="revenue";
@@ -400,23 +399,23 @@ function renderList(){
   }).join("");
 }
 function revHtml(d){
-  const r=revenueFor(d.name, detEp(d));
+  const r=revenueFor(d.name);
   if(!r) return `<div class="rev rev-none">시리즈<br>없음</div>`;
   const big = sMode==="total" ? wonFmt(r.full) : sMode==="deal" ? wonFmt(r.deal) : wonFmt(r.per);
   const bigLab = sMode==="total" ? "총매출" : sMode==="deal" ? "거래액" : "회차당";
   const others = sMode==="total" ? [["회차당",r.per],["거래액",r.deal]] : sMode==="deal" ? [["회차당",r.per],["총",r.full]] : [["총",r.full],["거래액",r.deal]];
   const small = others.map(([k,v])=>k+" "+wonFmt(v)).join(" · ");
-  return `<div class="rev" title="${bigLab} · 시리즈 다운 ${r.dl.toLocaleString()} ÷ ${r.ep}화"><span class="rev-full">${big}</span><span class="rev-per">${small}</span></div>`;
+  return `<div class="rev" title="${bigLab} · 시리즈 다운 ${r.dl.toLocaleString()} ÷ 시리즈 ${r.ep}화"><span class="rev-full">${big}</span><span class="rev-per">${small}</span></div>`;
 }
-/* 매출변동 행: 회차당 매출 전주(월~일) 대비 증감 */
+/* 매출변동 행: 회차당 매출 전주 대비(연재요일 주간) 증감 */
 function revChangeHtml(d){
-  const wc=d._wc||weeklyPerChange(d.name, detEp(d));
+  const wc=d._wc||weeklyPerChange(d.name, dowOf(d));
   if(!wc) return `<div class="rev rev-none">데이터<br>부족</div>`;
   const up=wc.delta>0, dn=wc.delta<0;
   const cls=up?"rc-up":dn?"rc-down":"rc-same";
   const big=(!up&&!dn)?"±0원":(up?"▲":"▼")+wonFmt(Math.abs(wc.delta));
-  const epTxt = wc.epDelta>0 ? ` · 회차 +${wc.epDelta}` : "";
-  return `<div class="rev rc ${cls}" title="이번주 회차당 ${wonFmt(wc.now)} · 전주 ${wonFmt(wc.prev)}${wc.epDelta>0?` · 회차 ${wc.epPrev}→${wc.epNow}`:""}"><span class="rev-full">${big}</span><span class="rev-per">회차당 ${wonFmt(wc.now)}${epTxt}</span></div>`;
+  const epTxt = wc.epDelta!==0 ? ` · 회차 ${wc.epDelta>0?"+":""}${wc.epDelta}` : "";
+  return `<div class="rev rc ${cls}" title="이번주 회차당 ${wonFmt(wc.now)} · 전주 ${wonFmt(wc.prev)}${wc.epDelta!==0?` · 회차 ${wc.epPrev}→${wc.epNow}`:""}"><span class="rev-full">${big}</span><span class="rev-per">회차당 ${wonFmt(wc.now)}${epTxt}</span></div>`;
 }
 
 const searchUrl = t => `https://search.naver.com/search.naver?query=${encodeURIComponent(t+" 웹툰")}`;
@@ -438,8 +437,8 @@ function detailHtml(det, name){
   if(det.cmt) info.push(["평균 댓글", det.cmt.toLocaleString()+"개"]);
   if(det.ep) info.push(["회차(총 N화)", det.ep+"화"]);
   if(det.fav) info.push(["관심", det.fav.toLocaleString()+"명"]);
-  const rv = name ? revenueFor(name, det.ep) : null;
-  if(rv){ info.push(["시리즈 다운로드", rv.dlStr+" ("+(rv.kind==="comic"?"웹툰":"웹소설")+")"]); info.push(["매출 추정", "회차당 "+wonFmt(rv.per)+" · 총 "+wonFmt(rv.full)]); info.push(["거래액", wonFmt(rv.deal)+" (다운수×320÷회차)"]); }
+  const rv = name ? revenueFor(name) : null;
+  if(rv){ info.push(["시리즈 다운로드", rv.dlStr+" ("+(rv.kind==="comic"?"웹툰":"웹소설")+")"]); info.push(["매출 추정", "회차당 "+wonFmt(rv.per)+" · 총 "+wonFmt(rv.full)+" (시리즈 "+rv.ep+"화 기준)"]); info.push(["거래액", wonFmt(rv.deal)+" (다운수×320÷시리즈 "+rv.ep+"화)"]); }
   let h="";
   if(info.length) h+=`<div class="mrows">`+info.map(([k,v])=>`<div class="mrow"><span class="mk">${k}</span><span class="mv">${esc(v)}</span></div>`).join("")+`</div>`;
   const kws=(det.k||[]).slice(); if(det.novel) kws.push("소설원작");
@@ -518,7 +517,7 @@ function openModal(d){
   // 매출 누적 그래프 (웹툰=매칭 시리즈 / 시리즈=자기 자신)
   if(webtoon||isSeries){ Promise.all([ensureSeries(), ensureSeriesDetails(), ensureRevHist(), webtoon?ensureDetails():Promise.resolve()]).then(()=>{
     if(modalSeq!==myTok) return; SNAMEIDX=SNAMEIDX||seriesNameIndex(); const box=document.getElementById("mrev");
-    if(box){ const html=revChartHtml(d.name, webtoon?detEp(d):0); box.innerHTML=html; box.hidden=!html; }
+    if(box){ const html=revChartHtml(d.name, dowOf(d)); box.innerHTML=html; box.hidden=!html; }
   }); }
 }
 /* 키워드 클릭 → 그 키워드 작품 전부 */
@@ -563,7 +562,7 @@ function openWorkModal(w){
   });
   Promise.all([ensureSeries(), ensureSeriesDetails(), ensureRevHist(), isWt?ensureDetails():Promise.resolve()]).then(()=>{
     if(modalSeq!==myTok) return; SNAMEIDX=SNAMEIDX||seriesNameIndex(); const box=document.getElementById("mrev");
-    if(box){ const html=revChartHtml(w.name, isWt?detEp(w):0); box.innerHTML=html; box.hidden=!html; }
+    if(box){ const html=revChartHtml(w.name, isWt?dowOf(w):0); box.innerHTML=html; box.hidden=!html; }
   });
 }
 /* 전체 작품 검색: 웹툰(LOOKUP) + 시리즈(SERIES) 통합 인덱스 */
