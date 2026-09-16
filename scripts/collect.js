@@ -210,9 +210,13 @@ async function collectDetails(existing){
   for(let i=0;i<refresh.length;i+=CONC){
     await Promise.all(refresh.slice(i,i+CONC).map(async id=>{
       try{
-        const al = await getJSON(`https://comic.naver.com/api/article/list?titleId=${id}&page=1&sort=ASC`, `https://comic.naver.com/webtoon/list?titleId=${id}`);
+        const al = await getJSON(`https://comic.naver.com/api/article/list?titleId=${id}&page=1&sort=DESC`, `https://comic.naver.com/webtoon/list?titleId=${id}`);   // DESC: 총화 + 최신공개화 + charge(유료) 한 번에
         details[id].adult = false;   // article/list 열림 = 비성인
-        if(al.totalCount){ details[id].ep = al.totalCount; rf++; if(!details[id].launch){ const first=(al.articleList||[])[0]; if(first) details[id].launch=first.serviceDateDescription||""; } }
+        if(al.totalCount){ details[id].ep = al.totalCount; rf++;
+          const list = al.articleList||[]; const maxNo = list.length ? (list[0].no||0) : 0; const chargePub = list.filter(a=>a.charge).length;  // 공개 최신화 no, 공개목록 중 유료(기다무)
+          const paid = Math.max(0, (al.totalCount - maxNo) + chargePub);   // 유료 = 미리보기(총-공개최신) + 공개중 유료
+          details[id].paid = paid; details[id].free = Math.max(0, al.totalCount - paid);   // 무료 = 총 - 유료
+        }
         else { details[id].adult = true; const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }
       }catch(e){ if(/ 40\d/.test(e.message)){ details[id].adult = true; try{ const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }catch(_){} } }   // 401/403 = 성인/차단 웹툰(comic.naver 로그아웃 목록차단) → 성인 플래그 + 댓글API 회차수
     }));
@@ -348,6 +352,23 @@ function updateRevenueHistory(dir, date){
   fs.writeFileSync(path.join(dir,"revenue_history.json"), JSON.stringify(rh));
   return { dates:rh.dates.length, works:Object.keys(rh.works).length };
 }
+/* 웹툰 무료/유료 회차수 날짜별 기록 → ep_history.json {dates:[], works:{titleId:{f:[무료],p:[유료]}}}. 매출 엑셀 Sheet1의 무료/유료 열용. 오늘부터 누적(성인작은 article/list 막혀 제외) */
+function updateEpHistory(dir, date, details){
+  if(!details){ try{ details=JSON.parse(fs.readFileSync(path.join(dir,"details.json"),"utf8")); }catch(e){ return null; } }
+  let eh={dates:[],works:{}}; try{ eh=JSON.parse(fs.readFileSync(path.join(dir,"ep_history.json"),"utf8")); }catch(e){}
+  if(!eh.dates) eh.dates=[]; if(!eh.works) eh.works={};
+  if(!eh.dates.includes(date)) eh.dates.push(date);
+  const di=eh.dates.indexOf(date);
+  for(const id in details){ const d=details[id]; if(d.free==null && d.paid==null) continue;
+    const w=eh.works[id]||(eh.works[id]={f:[],p:[]});
+    while(w.f.length<di){ w.f.push(null); w.p.push(null); }
+    w.f[di]=d.free!=null?d.free:null; w.p[di]=d.paid!=null?d.paid:null;
+  }
+  for(const id in eh.works){ const w=eh.works[id]; while(w.f.length<=di){ w.f.push(null); w.p.push(null); } }
+  const RMAX=150; if(eh.dates.length>RMAX){ const cut=eh.dates.length-RMAX; eh.dates.splice(0,cut); for(const id in eh.works){ eh.works[id].f.splice(0,cut); eh.works[id].p.splice(0,cut); } }
+  fs.writeFileSync(path.join(dir,"ep_history.json"), JSON.stringify(eh));
+  return { dates:eh.dates.length, works:Object.keys(eh.works).length };
+}
 
 // 재수집 병합: 빈값이면 기존 유지(로그아웃이 19금/검색작 dl 안 지움)
 function mergeDetail(old, pd, kind){ old=old||{}; return { g:pd.g||old.g||"", k:(pd.k&&pd.k.length)?pd.k:(old.k||[]), dl:pd.dl||old.dl||"", star:pd.star||old.star||"", cmt:pd.cmt||old.cmt||"", ep:pd.ep||old.ep||0, status:pd.status||old.status||"", syn:pd.syn||old.syn||"", kind:kind||pd.kind||old.kind }; }
@@ -357,7 +378,7 @@ function parseSeriesSearch(html){
   let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
   return out;
 }
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, parseDlNum, updateRevenueHistory, isoDate, mergeDetail, parseSeriesSearch, probeEpByComments };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, parseDlNum, updateRevenueHistory, updateEpHistory, isoDate, mergeDetail, parseSeriesSearch, probeEpByComments };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();
   console.log("collecting", date, "…");
@@ -384,6 +405,7 @@ if (require.main === module) (async ()=>{
   try { const rh = updateRevenueHistory(OUT, date); if(rh) console.log("revenue history:", JSON.stringify(rh)); } catch(e){ console.error("revenue history failed:", e.message); }
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
   fs.writeFileSync(path.join(OUT,"details.json"), JSON.stringify(details));
+  try { const eh = updateEpHistory(OUT, date, details); if(eh) console.log("ep(무료/유료) history:", JSON.stringify(eh)); } catch(e){ console.error("ep history failed:", e.message); }
   fs.writeFileSync(path.join(OUT,"history.json"), JSON.stringify(hist));
 
   try { await collectEpisodes(details, updated); } catch(e){ console.error("episodes failed:", e.message); } // best-effort 백필

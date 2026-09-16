@@ -11,7 +11,7 @@ let APP=null, WEEKDAY=null, GENRE=null, SERIES=null, PROMO=null, LOOKUP={id:{},n
 let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="";
 let rowsCache=[];
 let DETAILS=null, detailsLoading=null, HISTORY=null, historyLoading=null, KWINDEX=null, seriesLoading=null, promoLoading=null;
-let SERIESDET=null, seriesDetLoading=null, REVHIST=null, revHistLoading=null, SERIESEXTRA=null;
+let SERIESDET=null, seriesDetLoading=null, REVHIST=null, revHistLoading=null, SERIESEXTRA=null, EPHIST=null, epHistLoading=null;
 const DAILYPLUS=new Set();
 
 const F_MOVE=[["all","전체"],["up","상승"],["down","하락"]];
@@ -127,6 +127,8 @@ function ensureSeriesDetails(){ if(SERIESDET) return Promise.resolve(); if(!seri
     fetchJSON("data/series_extra.json").then(d=>{SERIESEXTRA=d;}).catch(()=>{SERIESEXTRA={map:{}};})
   ]).then(()=>{ SNAMEIDX=null; }); return seriesDetLoading; }
 function ensureRevHist(){ if(REVHIST) return Promise.resolve(); if(!revHistLoading) revHistLoading=fetchJSON("data/revenue_history.json").then(d=>{REVHIST=d;}).catch(()=>{REVHIST={dates:[],works:{}};}); return revHistLoading; }
+/* 웹툰 무료/유료 회차수 날짜별(ep_history.json) — 매출 엑셀 Sheet1 무료/유료 열용. 오늘부터 누적, 없으면 빈값 */
+function ensureEpHist(){ if(EPHIST) return Promise.resolve(); if(!epHistLoading) epHistLoading=fetchJSON("data/ep_history.json").then(d=>{EPHIST=d;}).catch(()=>{EPHIST={dates:[],works:{}};}); return epHistLoading; }
 /* 특정 작품(이름)의 매출 누적 시계열: revenueFor로 시리즈 pn 찾고 REVHIST에서 dl → 총매출, 회차당은 웹툰 총N화(epOverride)로 나눔 */
 function revSeriesFor(name, epOverride){
   const rv=revenueFor(name); if(!rv||!REVHIST||!REVHIST.works) return null;
@@ -217,9 +219,16 @@ function exportRevXLSX(name, dow){
   const rs=revSeriesFor(name, 0);
   if(!rs||!rs.has.length){ alert("아직 이 작품의 매출 누적 데이터가 없어요.\n매일 새벽 자동으로 쌓입니다."); return; }
   const sheets=[];
-  // Sheet1: 날짜별 누적
-  const rows=[["날짜","다운수","총회차수","총매출(원)","회차당매출(원)","거래액(원)"]];
-  for(const p of rs.pts){ if(p.total==null) continue; rows.push([p.dt, p.dl, p.ep, Math.round(p.total), Math.round(p.per), Math.round(p.deal)]); }
+  // 무료/유료(웹툰 미리보기 기준, ep_history 오늘부터 누적) 날짜별 조인
+  const wid = LOOKUP.name ? LOOKUP.name[name] : null;
+  const ephMap = {};
+  if(EPHIST && EPHIST.works && wid!=null && EPHIST.works[wid]){ const ew=EPHIST.works[wid], ed=EPHIST.dates||[]; ed.forEach((dt,i)=>{ ephMap[dt]={f:ew.f[i], p:ew.p[i]}; }); }
+  // Sheet1: 날짜별 누적. 유료=웹툰 미리보기 회차, 무료=총회차수−유료 (합=총회차수로 정합)
+  const rows=[["날짜","다운수","총회차수","무료회차","유료회차","총매출(원)","회차당매출(원)","거래액(원)"]];
+  for(const p of rs.pts){ if(p.total==null) continue; const e=ephMap[p.dt]||{};
+    const paid = e.p!=null ? Math.min(e.p, p.ep) : null;
+    const free = paid!=null ? Math.max(0, p.ep - paid) : null;
+    rows.push([p.dt, p.dl, p.ep, free!=null?free:"", paid!=null?paid:"", Math.round(p.total), Math.round(p.per), Math.round(p.deal)]); }
   sheets.push({name:"일별 누적", rows});
   // Sheet2: 주간 발생 매출(연재요일 주간) + 전주 대비 변동 금액·비율
   const weeks=weeklyRevenueWeeks(name, dow||0);
@@ -554,7 +563,7 @@ function openModal(d){
     if(el && DETAILS[d.id]) el.innerHTML = detailHtml(DETAILS[d.id], d.name);
   }); }
   // 매출 누적 그래프 (웹툰=매칭 시리즈 / 시리즈=자기 자신)
-  if(webtoon||isSeries){ Promise.all([ensureSeries(), ensureSeriesDetails(), ensureRevHist(), webtoon?ensureDetails():Promise.resolve()]).then(()=>{
+  if(webtoon||isSeries){ Promise.all([ensureSeries(), ensureSeriesDetails(), ensureRevHist(), ensureEpHist(), webtoon?ensureDetails():Promise.resolve()]).then(()=>{
     if(modalSeq!==myTok) return; SNAMEIDX=SNAMEIDX||seriesNameIndex(); const box=document.getElementById("mrev");
     if(box){ const html=revChartHtml(d.name, dowOf(d)); box.innerHTML=html; box.hidden=!html; }
   }); }
@@ -599,7 +608,7 @@ function openWorkModal(w){
     if(isWt) el.innerHTML = DETAILS[w.id]?detailHtml(DETAILS[w.id], w.name):'<div class="mloading">상세 정보 없음</div>';
     else el.innerHTML = (SERIESDET&&SERIESDET[w.id])?seriesDetailHtml(SERIESDET[w.id]):'<div class="mloading">상세 수집 중 — 매일 추가됩니다</div>';
   });
-  Promise.all([ensureSeries(), ensureSeriesDetails(), ensureRevHist(), isWt?ensureDetails():Promise.resolve()]).then(()=>{
+  Promise.all([ensureSeries(), ensureSeriesDetails(), ensureRevHist(), ensureEpHist(), isWt?ensureDetails():Promise.resolve()]).then(()=>{
     if(modalSeq!==myTok) return; SNAMEIDX=SNAMEIDX||seriesNameIndex(); const box=document.getElementById("mrev");
     if(box){ const html=revChartHtml(w.name, isWt?dowOf(w):0); box.innerHTML=html; box.hidden=!html; }
   });
