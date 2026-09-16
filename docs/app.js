@@ -8,7 +8,7 @@ const SERIES_CATNAMES = { comic:["전체장르","소년","순정","드라마","�
 const SERIES_PLATS = [["web","웹"],["mobile","모바일"]];
 
 let APP=null, WEEKDAY=null, GENRE=null, SERIES=null, PROMO=null, LOOKUP={id:{},name:{}}, WEEKS=[];
-let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="";
+let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="", revWeek="";
 let rowsCache=[];
 let DETAILS=null, detailsLoading=null, HISTORY=null, historyLoading=null, KWINDEX=null, seriesLoading=null, promoLoading=null;
 let SERIESDET=null, seriesDetLoading=null, REVHIST=null, revHistLoading=null, SERIESEXTRA=null, EPHIST=null, epHistLoading=null;
@@ -163,20 +163,39 @@ function weeklyRevenueWeeks(name, dow){
   }
   return weeks;
 }
-function weeklyRevenue(name, dow){
+function weeklyRevenue(name, dow, weekSel){
   const weeks=weeklyRevenueWeeks(name, dow);
   if(!weeks.length) return null;
-  const cur=weeks[weeks.length-1], prev=weeks.length>=2?weeks[weeks.length-2]:null;
+  let idx=weeks.length-1;
+  if(weekSel){ idx=weeks.findIndex(w=>w.ws===weekSel); if(idx<0) return null; }  // 선택한 주가 이 작품엔 없으면 제외
+  const cur=weeks[idx], prev=idx>=1?weeks[idx-1]:null;
   return { rev:cur.rev, perRev:cur.perRev, ep:cur.ep, ws:cur.ws, we:cur.we, prev,
     delta: prev?cur.rev-prev.rev:null, perDelta: prev?cur.perRev-prev.perRev:null,
     sortKey: prev? cur.perRev-prev.perRev : cur.perRev, hasPrev:!!prev };
 }
 /* 매출변동 탭 라벨: 전체/성인/매일+ = 주차(9월 N째주), 요일별 = 정확 날짜(9/9~9/15) */
 const SUB_DOW={mon:0,tue:1,wed:2,thu:3,fri:4,sat:5,sun:6};
+/* 그 연재요일의 완전한 주(다음 경계 데이터 있는 주) 시작일 목록, 최신 먼저 */
+function revWeekOptions(dow){
+  const dates=(REVHIST&&REVHIST.dates)||[]; const set=new Set(dates);
+  const out=[];
+  for(const dt of dates){ if(weekStart(dt,dow)===dt && set.has(addDays(dt,7))) out.push(dt); }
+  return out.reverse();
+}
 function revWeekLabel(){
   const dates=(REVHIST&&REVHIST.dates)||[]; const latest=dates[dates.length-1]||isoToday();
-  if(sub in SUB_DOW){ const S=weekStart(addDays(latest,-7), SUB_DOW[sub]); return `${mdShort(S)}~${mdShort(addDays(S,6))}`; }  // 완료된 최근 주
+  if(sub in SUB_DOW){ const S = revWeek || revWeekOptions(SUB_DOW[sub])[0] || weekStart(addDays(latest,-7), SUB_DOW[sub]); return `${mdShort(S)}~${mdShort(addDays(S,6))}`; }
   return weekLabel(addDays(latest,-1));
+}
+/* 매출변동 주 선택 드롭다운: 요일 서브에서만 표시, 그 요일의 완전한 주 목록 */
+function renderRevWsel(){
+  const sel=document.getElementById("revwsel"); if(!sel) return;
+  if(src!=="revchange" || !(sub in SUB_DOW)){ sel.hidden=true; revWeek=""; return; }
+  const opts=revWeekOptions(SUB_DOW[sub]);
+  if(!opts.includes(revWeek)) revWeek = opts[0] || "";
+  sel.hidden=false;
+  sel.innerHTML = opts.length ? opts.map(S=>`<option value="${S}"${S===revWeek?" selected":""}>${mdShort(S)}~${mdShort(addDays(S,6))}</option>`).join("") : `<option value="">주 데이터 없음</option>`;
+  sel.onchange=()=>{ revWeek=sel.value; renderList(); };
 }
 function isoToday(){ const d=new Date(); return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); }
 /* 매출 누적 이중 라인 차트(총매출·회차당) — 각 지표 자체 스케일, 축은 하나씩(이중축 아님) */
@@ -325,6 +344,7 @@ function viewRows(){ return (SOURCES[src].data(variant,sub)||[]).map(enrichRow);
 
 function renderView(){
   const S=SOURCES[src], caps=S.caps;
+  renderRevWsel();   // 매출변동 주 선택 드롭다운(요일 서브에서만) — revWeek 확정 후 meta/list
   document.getElementById("meta").innerHTML=`${esc(S.note(variant))} · <b>${esc(subLabel(sub))}</b>`;
   document.getElementById("tiles").hidden=!caps.tiles;
   document.getElementById("panels").hidden=!caps.tiles;
@@ -408,7 +428,7 @@ function renderList(){
     return true;
   });
   if(caps.revchange){
-    rows=rows.map(d=>{ d._wr=weeklyRevenue(d.name, dowOf(d)); return d; }).filter(d=>d._wr);
+    rows=rows.map(d=>{ d._wr=weeklyRevenue(d.name, dowOf(d), revWeek); return d; }).filter(d=>d._wr);
     rows=[...rows].sort((a,b)=> sMode==="loss" ? (a._wr.sortKey-b._wr.sortKey) : (b._wr.sortKey-a._wr.sortKey));
     rows.forEach((d,i)=>{ d._rk=i+1; });
   }
@@ -455,7 +475,7 @@ function revHtml(d){
 }
 /* 매출변동 행: 그 주(연재요일 주간) 발생 매출 — 회차당 기준 정렬, 총·회차당 병기. 전주 대비 변동은 완전한 2주부터 */
 function revChangeHtml(d){
-  const wr=d._wr||weeklyRevenue(d.name, dowOf(d));
+  const wr=d._wr||weeklyRevenue(d.name, dowOf(d), revWeek);
   if(!wr) return `<div class="rev rev-none">주간<br>대기</div>`;
   const range=`${mdShort(wr.ws)}~${mdShort(wr.we)}`;
   if(wr.hasPrev){

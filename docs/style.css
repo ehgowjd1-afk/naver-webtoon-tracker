@@ -73,6 +73,9 @@ h1{font-family:"Black Han Sans","IBM Plex Sans KR",sans-serif; font-weight:400; 
 
 /* sub nav (pills) */
 .subnav{display:flex; gap:6px; flex-wrap:wrap; margin-bottom:20px}
+.subrow{display:flex; align-items:flex-start; gap:10px; margin-bottom:20px}
+.subrow .subnav{flex:1 1 auto; min-width:0; margin-bottom:0}
+#revwsel{margin-bottom:0; flex:none; max-width:none; align-self:flex-start}
 .sub{border:1px solid var(--border); background:var(--surface); color:var(--muted); font-family:inherit; font-weight:500; font-size:13px; padding:7px 14px; border-radius:20px; cursor:pointer; white-space:nowrap; transition:.13s}
 .sub:hover{border-color:var(--border-strong); color:var(--ink)}
 .sub[aria-selected="true"]{background:var(--accent); border-color:var(--accent); color:var(--on-accent)}

@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=29">
+<link rel="stylesheet" href="style.css?v=30">
 </head>
 <body>
 <div class="wrap">
@@ -41,7 +41,10 @@
     <div class="varnav" id="platnav" role="tablist" aria-label="웹/모바일 선택"></div>
     <select class="wsel" id="scatsel" aria-label="장르 선택" title="장르 선택"></select>
   </div>
-  <div class="subnav" id="subnav" role="tablist" aria-label="세부 선택"></div>
+  <div class="subrow" id="subrow">
+    <div class="subnav" id="subnav" role="tablist" aria-label="세부 선택"></div>
+    <select class="wsel" id="revwsel" aria-label="주 선택" title="주 선택 (매출 변동)" hidden></select>
+  </div>
 
   <section class="tiles" id="tiles" hidden></section>
   <section class="panels" id="panels" hidden>
@@ -84,6 +87,6 @@
 </div>
 
 <script src="xlsx.js?v=1"></script>
-<script src="app.js?v=42"></script>
+<script src="app.js?v=43"></script>
 </body>
 </html>
