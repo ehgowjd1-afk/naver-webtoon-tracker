@@ -29,7 +29,7 @@ const MAX = Number((args.find(a => a.startsWith("--max=")) || "").split("=")[1] 
 const STATE = path.join(__dirname, ".pw-state.json"); // 연령확인된 세션 상태(쿠키) 저장 — 자동수집 재사용용(git 제외)
 function pushData() {
   try {
-    execSync(`git -C "${ROOT}" add docs/data/series_details.json docs/data/series_extra.json docs/data/revenue_history.json`, { stdio: "inherit" });
+    execSync(`git -C "${ROOT}" add docs/data/series_details.json docs/data/series_extra.json docs/data/revenue_history.json docs/data/details.json docs/data/ep_history.json`, { stdio: "inherit" });
     execSync(`git -C "${ROOT}" commit -m "adult: 성인 시리즈 다운수 ${C.isoDate()}"`, { stdio: "inherit" });
     for (let i = 0; i < 3; i++) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); execSync(`git -C "${ROOT}" push origin main`, { stdio: "inherit" }); console.log("푸시 완료"); return; } catch (e) { console.log("재시도", i + 1); } }
   } catch (e) { console.log("변경 없음/커밋 스킵"); }
@@ -79,6 +79,34 @@ async function collectAll(page, opts = {}) {
   console.log(`완료: ${got}개 다운수 확보 · 매출히스토리 ${JSON.stringify(rh)}`);
   return got;
 }
+/* 성인 웹툰 무료/유료 회차: CDP(로그인+연령확인) 브라우저는 성인 comic.naver article/list도 열림 → 미리보기(유료)·무료 계산.
+   det[id].adult 웹툰만. det.free/paid 설정 후 ep_history 갱신(엑셀 Sheet1 무료/유료 열용). ep는 안 건드림(시리즈 회차수 기준 유지). */
+async function collectAdultCharge(page, opts = {}) {
+  const { dmin = 1500, dmax = 3500, cap = Infinity } = opts;
+  const det = readJSON("details.json", {});
+  let ids = Object.keys(det).filter(id => det[id] && det[id].adult === true);
+  if (ids.length > cap) ids = ids.slice(0, cap);
+  console.log("성인 웹툰 무료/유료 대상 " + ids.length + "개");
+  try { await page.goto("https://comic.naver.com/", { waitUntil: "domcontentloaded", timeout: 30000 }); } catch (e) {}
+  let got = 0, done = 0;
+  for (const id of ids) {
+    try {
+      const al = await page.evaluate(async (id) => { const r = await fetch(`/api/article/list?titleId=${id}&page=1&sort=DESC`, { credentials: "include" }); if (!r.ok) return null; return await r.json(); }, id);
+      if (al && al.totalCount) {
+        const T = al.totalCount, list = al.articleList || [], maxNo = list.length ? (list[0].no || 0) : 0, chargePub = list.filter(a => a.charge).length;
+        const paid = Math.max(0, (T - maxNo) + chargePub);
+        det[id].paid = paid; det[id].free = Math.max(0, T - paid); got++;   // ep는 유지(시리즈 회차수 기준)
+      }
+    } catch (e) {}
+    done++;
+    if (done % 10 === 0) { fs.writeFileSync(path.join(D, "details.json"), JSON.stringify(det)); console.log("  성인 유무료 " + done + "/" + ids.length + " (" + got + ")"); }
+    await sleep(dmin + Math.floor(Math.random() * Math.max(0, dmax - dmin)));
+  }
+  fs.writeFileSync(path.join(D, "details.json"), JSON.stringify(det));
+  const eh = C.updateEpHistory(D, C.isoDate(), det);
+  console.log(`성인 무료/유료 완료: ${got}개 · ep_history ${JSON.stringify(eh)}`);
+  return got;
+}
 
 (async () => {
   // --cdp: 사용자가 직접 켠 '진짜 크롬'(원격 디버깅)에 붙어서, 사람이 로그인/연령확인한 세션으로 아주 천천히 조금씩 수집 (계정 부담 최소화)
@@ -93,8 +121,10 @@ async function collectAll(page, opts = {}) {
     if (!(await adultOk(context))) { console.log("❌ 아직 성인 접근 안 됨(연령확인 대기) — 다음 재시도 때 다시 시도합니다."); await browser.close(); process.exit(2); }
     console.log(`✅ 진짜 크롬 세션으로 성인 접근 OK — 최대 ${MAX}개 수집(2~4.5초 간격)`);
     const got = await collectAll(page, { cap: MAX, dmin: 2000, dmax: 4500 }); // 매일 전체 갱신용(적당히 천천히)
+    let gotCharge = 0;
+    try { gotCharge = await collectAdultCharge(page, { cap: MAX, dmin: 1500, dmax: 3500 }); } catch (e) { console.log("성인 무료/유료 실패:", e.message); }
     await browser.close(); // CDP는 disconnect만 (사용자 크롬은 그대로 열려있음)
-    if (PUSH && got > 0) pushData();
+    if (PUSH && (got > 0 || gotCharge > 0)) pushData();
     return;
   }
 
