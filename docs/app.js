@@ -147,9 +147,9 @@ const mdShort = s => { const p=(s||"").split("-"); return p.length<3?s:(+p[1])+"
 /* 그 주(연재요일 S ~ S+6) 실제 발생 매출.
    ★수집일 X의 다운수 = 전날(X-1)까지 누적. 따라서 주[S,S+6] 매출 = D(수집 S+7) − D(수집 S) (연속 연재요일 경계 스냅샷 차). 회차수 = 주 마감(S+7 수집)의 시리즈 회차수.
    정렬은 회차당(perRev). 전주 대비 변동(delta)은 완전한 2주가 있을 때. */
-function weeklyRevenue(name, dow){
-  const rv=revenueFor(name); if(!rv||!REVHIST||!REVHIST.works) return null;
-  const w=REVHIST.works[rv.pn]; if(!w) return null;
+function weeklyRevenueWeeks(name, dow){
+  const rv=revenueFor(name); if(!rv||!REVHIST||!REVHIST.works) return [];
+  const w=REVHIST.works[rv.pn]; if(!w) return [];
   const dates=REVHIST.dates||[], k=UNIT_PRICE(rv.kind)*0.9*0.6, dIdx={};
   dates.forEach((dt,i)=>dIdx[dt]=i);
   const bnds=dates.filter((dt,i)=>w.dl[i]!=null && weekStart(dt,dow)===dt);  // 데이터 있는 연재요일 경계 수집일
@@ -159,6 +159,10 @@ function weeklyRevenue(name, dow){
     const rev=(w.dl[iE]-w.dl[iS])*k, ep=w.ep[iE]||w.ep[iS]||rv.ep||1;
     weeks.push({ws:S, we:addDays(S,6), rev, ep, perRev:rev/ep});
   }
+  return weeks;
+}
+function weeklyRevenue(name, dow){
+  const weeks=weeklyRevenueWeeks(name, dow);
   if(!weeks.length) return null;
   const cur=weeks[weeks.length-1], prev=weeks.length>=2?weeks[weeks.length-2]:null;
   return { rev:cur.rev, perRev:cur.perRev, ep:cur.ep, ws:cur.ws, we:cur.we, prev,
@@ -178,7 +182,7 @@ function revChartHtml(name, dow){
   const rs=revSeriesFor(name, 0);
   if(!rs) return "";
   const n=rs.has.length;
-  if(n<2){ return `<div class="mrevbox"><div class="mrevhd"><span class="mrevt">💰 매출 누적</span><span class="mrevn">${n?"1일차 · 내일부터 그래프가 그려져요":"수집 시작 전"}</span></div><div class="mrevempty">매일 새벽 자동으로 다운수·회차수를 기록해 총매출·회차당 매출 변화를 쌓아갑니다. ${n?"오늘 첫 기록 완료 ✓":""}</div>${n?`<button class="mepbtn" data-rev="1" data-name="${esc(name)}" data-ep="0">⬇ 매출 누적 엑셀</button>`:""}</div>`; }
+  if(n<2){ return `<div class="mrevbox"><div class="mrevhd"><span class="mrevt">💰 매출 누적</span><span class="mrevn">${n?"1일차 · 내일부터 그래프가 그려져요":"수집 시작 전"}</span></div><div class="mrevempty">매일 새벽 자동으로 다운수·회차수를 기록해 총매출·회차당 매출 변화를 쌓아갑니다. ${n?"오늘 첫 기록 완료 ✓":""}</div>${n?`<button class="mepbtn" data-rev="1" data-name="${esc(name)}" data-dow="${dow||0}">⬇ 매출 엑셀 (일별+주간)</button>`:""}</div>`; }
   const mkLine=(vals,color)=>{
     const W=280,H=64,pad=6, xs=v=>pad+(v/(rs.pts.length-1||1))*(W-2*pad);
     const idx=rs.pts.map((p,i)=>[i,p]).filter(x=>x[1].total!=null);
@@ -204,17 +208,32 @@ function revChartHtml(name, dow){
     ${mkLine(p=>p.per,"var(--down)")}
     <div class="mrevrow"><div class="mrevlab"><i style="background:var(--up)"></i>거래액</div><div class="mrevval">${wonFmt(lastP.deal)} <small>${chg(first.deal,lastP.deal)}</small></div></div>
     ${mkLine(p=>p.deal,"var(--up)")}
-    <button class="mepbtn" data-rev="1" data-name="${esc(name)}" data-ep="0">⬇ 매출 누적 엑셀</button>
+    <button class="mepbtn" data-rev="1" data-name="${esc(name)}" data-dow="${dow||0}">⬇ 매출 엑셀 (일별+주간)</button>
   </div>`;
 }
-/* 매출 누적 엑셀: 날짜별 다운수·회차수·총매출·회차당 */
-function exportRevXLSX(name, epOverride){
+/* 매출 누적 엑셀: Sheet1=날짜별 누적, Sheet2=주간 발생 매출(연재요일 기준)·전주 대비 변동 */
+function exportRevXLSX(name, dow){
   if(!window.MiniXlsx){ alert("엑셀 모듈 로딩 실패 — 새로고침 후 다시 시도해주세요."); return; }
-  const rs=revSeriesFor(name, epOverride);
+  const rs=revSeriesFor(name, 0);
   if(!rs||!rs.has.length){ alert("아직 이 작품의 매출 누적 데이터가 없어요.\n매일 새벽 자동으로 쌓입니다."); return; }
-  const rows=[["날짜","다운수","회차수","총매출(원)","회차당매출(원)","거래액(원)"]];
+  const sheets=[];
+  // Sheet1: 날짜별 누적
+  const rows=[["날짜","다운수","총회차수","총매출(원)","회차당매출(원)","거래액(원)"]];
   for(const p of rs.pts){ if(p.total==null) continue; rows.push([p.dt, p.dl, p.ep, Math.round(p.total), Math.round(p.per), Math.round(p.deal)]); }
-  MiniXlsx.downloadMulti([{name:"매출누적", rows}], name+"_매출누적");
+  sheets.push({name:"일별 누적", rows});
+  // Sheet2: 주간 발생 매출(연재요일 주간) + 전주 대비 변동 금액·비율
+  const weeks=weeklyRevenueWeeks(name, dow||0);
+  const wk=[["주간(연재요일 기준)","총 주간매출(원)","회차당 주간매출(원)","전주대비 총매출(원)","전주대비 총매출(%)","전주대비 회차당(원)","전주대비 회차당(%)"]];
+  weeks.forEach((c,i)=>{ const p=i>0?weeks[i-1]:null;
+    const dRev=p?c.rev-p.rev:null, dPer=p?c.perRev-p.perRev:null;
+    const pctRev=(p&&p.rev)?(dRev/p.rev*100):null, pctPer=(p&&p.perRev)?(dPer/p.perRev*100):null;
+    wk.push([`${mdShort(c.ws)}~${mdShort(c.we)}`, Math.round(c.rev), Math.round(c.perRev),
+      p?Math.round(dRev):"", pctRev!=null?(pctRev>=0?"+":"")+pctRev.toFixed(1)+"%":"",
+      p?Math.round(dPer):"", pctPer!=null?(pctPer>=0?"+":"")+pctPer.toFixed(1)+"%":""]);
+  });
+  if(wk.length===1) wk.push(["완전한 한 주가 끝나면 표시됩니다 (연재요일 기준, 수집 지연 반영)","","","","","",""]);
+  sheets.push({name:"주간 발생매출", rows:wk});
+  MiniXlsx.downloadMulti(sheets, name+"_매출");
 }
 function seriesDetailHtml(sd){
   const info=[];
@@ -618,7 +637,7 @@ function wireModal(){
   document.addEventListener("keydown", e=>{ if(e.key==="Escape"&&!modal.hidden) close(); });
   document.getElementById("modalBody").addEventListener("click", e=>{
     const kb=e.target.closest("[data-kw]"); if(kb){ e.preventDefault(); openKeywordList(kb.dataset.kw); return; }
-    const rb=e.target.closest("[data-rev]"); if(rb){ exportRevXLSX(rb.dataset.name, +rb.dataset.ep||0); return; }
+    const rb=e.target.closest("[data-rev]"); if(rb){ exportRevXLSX(rb.dataset.name, +rb.dataset.dow||0); return; }
     const tb=e.target.closest("[data-trend]"); if(tb){ exportTrendXLSX(+tb.dataset.id, tb.dataset.name); return; }
     const ep=e.target.closest(".mepbtn"); if(ep && ep.dataset.id){ exportEpisodeCSV(+ep.dataset.id, ep.dataset.name); }
   });
