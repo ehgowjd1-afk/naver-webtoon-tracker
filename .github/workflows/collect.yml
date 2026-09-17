@@ -3,7 +3,11 @@ name: collect
 # 앱 「이번 주 웹툰 랭킹」(전체/여성/남성)은 앱 전용이라 여기서 수집 불가 → 수동 커밋.
 on:
   schedule:
-    - cron: "15 0 * * *"   # 00:15 UTC = 09:15 KST
+    # GitHub 스케줄 크론은 자주 지연·누락됨(실제로 이틀 연속 누락) → 예비 시각 여러 개 등록.
+    # 하나라도 뜨면 수집되고, 오늘 이미 수집됐으면 아래 '가드' 스텝이 즉시 스킵하므로 중복 없음.
+    - cron: "15 0 * * *"   # 00:15 UTC = 09:15 KST (주 시각)
+    - cron: "15 3 * * *"   # 03:15 UTC = 12:15 KST (예비 1)
+    - cron: "15 6 * * *"   # 06:15 UTC = 15:15 KST (예비 2)
   workflow_dispatch:
 
 permissions:
@@ -18,12 +22,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 30   # 가드가 최근 커밋 이력을 확인(오늘 이미 수집됐는지)
+      - name: 오늘 이미 수집됐는지 확인 (예약 실행만 스킵, 수동은 항상 실행)
+        id: guard
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && git log -30 --pretty=%s | grep -Fxq "auto: 랭킹 자동수집 $(date -u +%Y-%m-%d)"; then
+            echo "오늘 이미 수집됨(예약) — 스킵"
+            echo "done=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "done=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-node@v4
+        if: steps.guard.outputs.done == 'false'
         with:
           node-version: 24
       - name: 수집
+        if: steps.guard.outputs.done == 'false'
         run: node scripts/collect.js
       - name: 커밋 & 푸시
+        if: steps.guard.outputs.done == 'false'
         run: |
           git config user.name "ehgowjd1-afk"
           git config user.email "ehgowjd1@gmail.com"
