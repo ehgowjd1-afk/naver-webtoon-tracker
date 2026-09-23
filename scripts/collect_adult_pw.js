@@ -38,6 +38,35 @@ const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(D
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const CHECK_PN = 10851069, CHECK_KIND = "comic"; // 성인 접근 확인용 기준작(로그인+연령확인 되면 dl 노출)
 
+// 멈춘(hung) 탭 자동 복구: 탭이 멈춰 있으면 Playwright connectOverCDP가 그 탭에 붙으려다 전체 연결 실패.
+// raw CDP(HTTP+페이지 ws)로 각 페이지 탭에 Runtime.evaluate를 보내 5초 무응답이면 Page.navigate로 강제 리로드.
+const http = require("http");
+function cdpJSON(pth) { return new Promise((res, rej) => { http.get("http://localhost:9222" + pth, r => { let s = ""; r.on("data", d => s += d); r.on("end", () => { try { res(JSON.parse(s)); } catch (e) { res(null); } }); }).on("error", rej); }); }
+function getWS() { try { if (globalThis.WebSocket) return globalThis.WebSocket; } catch (e) {} try { return require("playwright-core/lib/utilsBundle").ws; } catch (e) {} return null; }
+function pingOrReload(pg) {
+  return new Promise((resolve) => {
+    const WS = getWS(); if (!WS) return resolve("no-ws");
+    let ws; try { ws = new WS(pg.webSocketDebuggerUrl); } catch (e) { return resolve("ws-fail"); }
+    let settled = false; const fin = (v) => { if (settled) return; settled = true; try { ws.close(); } catch (e) {} resolve(v); };
+    const to = setTimeout(() => { // 무응답 = 멈춤 → 리로드
+      try { ws.send(JSON.stringify({ id: 2, method: "Page.navigate", params: { url: (pg.url && pg.url.startsWith("http")) ? pg.url : "https://comic.naver.com/index" } })); } catch (e) {}
+      setTimeout(() => fin("reloaded(hung)"), 3000);
+    }, 5000);
+    ws.onopen = () => { try { ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression: "1", returnByValue: true } })); } catch (e) {} };
+    ws.onmessage = (m) => { try { const msg = JSON.parse(m.data.toString()); if (msg.id === 1) { clearTimeout(to); fin("ok"); } } catch (e) {} };
+    ws.onerror = () => { clearTimeout(to); fin("ws-err"); };
+  });
+}
+async function healPages() {
+  try {
+    const pages = (await cdpJSON("/json")) || [];
+    const ps = pages.filter(p => p.type === "page");
+    let reloaded = false;
+    for (const pg of ps) { const r = await pingOrReload(pg); if (r !== "ok") { console.log("탭 복구:", (pg.url || "").slice(0, 35), "→", r); reloaded = true; } }
+    if (reloaded) await sleep(3000); // 리로드된 탭이 로드 시작하도록 잠깐 대기
+  } catch (e) { console.log("healPages 스킵:", e.message); }
+}
+
 async function scrapeDl(page, pn, kind) {
   await page.goto(`https://series.naver.com/${kind}/detail.series?productNo=${pn}`, { waitUntil: "domcontentloaded", timeout: 30000 });
   const pd = C.parseSeriesDetail(await page.content()); pd.kind = kind; return pd;
@@ -111,6 +140,7 @@ async function collectAdultCharge(page, opts = {}) {
 (async () => {
   // --cdp: 사용자가 직접 켠 '진짜 크롬'(원격 디버깅)에 붙어서, 사람이 로그인/연령확인한 세션으로 아주 천천히 조금씩 수집 (계정 부담 최소화)
   if (CDP) {
+    await healPages(); // 멈춘 탭 자동 복구(connectOverCDP가 hung 탭에 막히는 문제 방지)
     let browser;
     try { browser = await chromium.connectOverCDP("http://localhost:9222"); }
     catch (e) { console.log("❌ 디버그 크롬에 연결 실패 — 먼저 chrome_debug.bat 로 크롬을 켜고 네이버 로그인+연령확인 하세요."); process.exit(1); }
