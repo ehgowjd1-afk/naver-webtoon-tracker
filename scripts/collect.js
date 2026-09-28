@@ -158,8 +158,13 @@ async function collectSeriesDetails(seriesData, existing){
   const det = existing || {};
   const seen = new Set(), order = [];
   for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const cat in (seriesData[kind]||{})[pf]||{}) for(const p in seriesData[kind][pf][cat]) for(const it of seriesData[kind][pf][cat][p]){ if(!seen.has(it.id)){ seen.add(it.id); order.push([it.id, kind]); } }
+  const rankedN = order.length;
+  // ★랭킹 밖 '검색연동' 작품(신작 등)도 매일 갱신 — 랭킹에만 의존하면 랭킹 밖 작품 다운수가 안 바뀌던 사각지대 해소
+  try{ const se = JSON.parse(fs.readFileSync(path.join(OUT, "series_extra.json"), "utf8"));
+    if(se.map) for(const nm in se.map) for(const e of (se.map[nm]||[])){ if(e && e.pn!=null && !seen.has(e.pn)){ seen.add(e.pn); order.push([e.pn, e.kind||"comic"]); } }
+  }catch(e){}
   // 매일 전체 재수집(갱신) — 다운수가 새벽 4시(KST)에 바뀌므로. 실패/빈응답이면 기존값 유지.
-  const CAP = 2500; let done = 0, refreshed = 0;
+  const CAP = 4000; let done = 0, refreshed = 0;
   for(const [id, kind] of order){
     if(done >= CAP) break;
     try{ const h = await getText(`https://series.naver.com/${kind}/detail.series?productNo=${id}`, UA_PC, "https://series.naver.com/"); const pd = parseSeriesDetail(h); pd.kind = kind;
@@ -168,7 +173,7 @@ async function collectSeriesDetails(seriesData, existing){
     catch(e){ /* 기존값 유지 */ }
     done++; await sleep(80);
   }
-  console.log("series details:", refreshed, "갱신 / 시도", done, "/ 대상", order.length, "/ 총", Object.keys(det).length);
+  console.log("series details:", refreshed, "갱신 / 시도", done, "/ 대상", order.length, "(랭킹", rankedN, "+ 연동", order.length - rankedN, ") / 총", Object.keys(det).length);
   return det;
 }
 
