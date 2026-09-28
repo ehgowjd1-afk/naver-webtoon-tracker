@@ -177,6 +177,43 @@ async function collectSeriesDetails(seriesData, existing){
   return det;
 }
 
+// 검색연동: 시리즈 미연동 웹툰을 '시리즈 통합검색'(로그아웃 공개, 클라우드 가능)으로 찾아 series_extra.map에 연결.
+// 랭킹에 없는 신작도 연결 → collectSeriesDetails가 매일 다운수 갱신. map 키=normName(프론트 연동키와 동일).
+const _normName  = s => String(s||"").replace(/\s*\[[^\]]*\]\s*$/, "").replace(/\s+/g, "");
+const _normMatch = s => { s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^\])>]*[\])>]\s*$/, ""); }while(s!==p); return s.replace(/\s+/g,"").toLowerCase(); };
+async function searchLinkWebtoons(seriesData, sd, extra, cap=400){
+  extra.map = extra.map || {}; extra.owned = extra.owned || [];
+  const ownedSet = new Set(extra.owned);
+  const idx = {};
+  for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const c in (seriesData[kind]||{})[pf]||{}) for(const p in seriesData[kind][pf][c]) for(const it of seriesData[kind][pf][c][p]){ const n=_normName(it.t); (idx[n]||(idx[n]=[])).push({pn:it.id,kind}); }
+  const hasComic = n => (idx[n]||[]).some(x=>x.kind==="comic"&&sd[x.pn]&&sd[x.pn].dl&&sd[x.pn].ep) || (extra.map[n]||[]).some(x=>x.kind==="comic"&&sd[x.pn]&&sd[x.pn].dl&&sd[x.pn].ep);
+  const src = Object.keys(idL).length ? idL : (()=>{ try{ return JSON.parse(fs.readFileSync(path.join(OUT,"lookup.json"),"utf8")).id||{}; }catch(e){ return {}; } })();
+  const wt = Object.entries(src).map(([id,v])=>({id:+id, name:Array.isArray(v)?v[0]:(v&&v.name)})).filter(x=>x.name);
+  let searched=0, found=0;
+  for(const w of wt){
+    if(searched>=cap) break;
+    const key=_normName(w.name);
+    if(hasComic(key)) continue;   // 코믹 연결 완료 → 스킵. 미연결이면 코믹 나올 때까지 매일 재검색
+    searched++;
+    try{
+      const h=await getText(`https://series.naver.com/search/search.series?t=all&q=${encodeURIComponent(w.name)}`, UA_PC, "https://series.naver.com/");
+      const res=parseSeriesSearch(h);
+      const nm=_normMatch(w.name);
+      const hit=res.find(r=>r.kind==="comic"&&_normMatch(r.title)===nm);   // 웹툰은 코믹만 연결(웹소설 오연결 방지)
+      if(hit){
+        try{ const dh=await getText(`https://series.naver.com/${hit.kind}/detail.series?productNo=${hit.pn}`, UA_PC, "https://series.naver.com/"); const pd=parseSeriesDetail(dh); pd.kind=hit.kind; if(pd.dl||pd.g||pd.ep||pd.syn){ sd[hit.pn]=mergeDetail(sd[hit.pn], pd, hit.kind); if(pd.dl) found++; } }catch(e){}
+        const a=extra.map[key]||(extra.map[key]=[]);
+        if(!a.some(x=>x.pn===hit.pn)) a.push({pn:hit.pn, kind:hit.kind});
+        ownedSet.add(hit.pn);
+      }
+    }catch(e){}
+    await sleep(120);
+  }
+  extra.owned=[...ownedSet]; extra.updated=new Date().toISOString();
+  console.log("검색연동:", searched, "건 검색 /", found, "신규 다운수 연동");
+  return { searched, found };
+}
+
 /* 작품 상세(장르·키워드·제작사·관심수·연령·요일·줄거리) — 신규 titleId만 증분 수집 */
 async function collectDetails(existing){
   const details = existing || {};
@@ -383,7 +420,7 @@ function parseSeriesSearch(html){
   let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
   return out;
 }
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, parseDlNum, updateRevenueHistory, updateEpHistory, isoDate, mergeDetail, parseSeriesSearch, probeEpByComments };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, isoDate, mergeDetail, parseSeriesSearch, probeEpByComments };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();
   console.log("collecting", date, "…");
@@ -406,6 +443,14 @@ if (require.main === module) (async ()=>{
   fs.writeFileSync(path.join(OUT,"genre.json"), JSON.stringify({ updated, date, web:web_gn, app:app_gn }));
   fs.writeFileSync(path.join(OUT,"series.json"), JSON.stringify({ updated, date, comic:s_comic, novel:s_novel }));
   try { const promo = await collectPromo(); fs.writeFileSync(path.join(OUT,"promo.json"), JSON.stringify({ updated, date, comic:promo.comic, novel:promo.novel })); } catch(e){ console.error("promo failed:", e.message); }
+  // 검색연동(신작 등 미연동 웹툰을 시리즈에 연결) → collectSeriesDetails가 이어서 다운수 갱신. PC 없이 클라우드에서 매일.
+  try {
+    let sd={}; try{ sd=JSON.parse(fs.readFileSync(path.join(OUT,"series_details.json"),"utf8")); }catch(e){}
+    let extra={updated:"",map:{},owned:[]}; try{ extra=JSON.parse(fs.readFileSync(path.join(OUT,"series_extra.json"),"utf8")); }catch(e){}
+    await searchLinkWebtoons({comic:s_comic, novel:s_novel}, sd, extra);
+    fs.writeFileSync(path.join(OUT,"series_details.json"), JSON.stringify(sd));
+    fs.writeFileSync(path.join(OUT,"series_extra.json"), JSON.stringify(extra));
+  } catch(e){ console.error("search-link failed:", e.message); }
   try { let sd={}; try{ sd=JSON.parse(fs.readFileSync(path.join(OUT,"series_details.json"),"utf8")); }catch(e){} sd=await collectSeriesDetails({comic:s_comic, novel:s_novel}, sd); fs.writeFileSync(path.join(OUT,"series_details.json"), JSON.stringify(sd)); } catch(e){ console.error("series details failed:", e.message); }
   try { const rh = updateRevenueHistory(OUT, date); if(rh) console.log("revenue history:", JSON.stringify(rh)); } catch(e){ console.error("revenue history failed:", e.message); }
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
