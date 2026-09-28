@@ -84,9 +84,9 @@ let group="naver";
 const subLabel = s => src==="app" ? s : (SOURCES[src].subs().find(x=>x[0]===s)||[s,s])[1];
 const varLabel = () => { const vs=SOURCES[src].variants; return vs?(vs.find(x=>x[0]===variant)||["",""])[1]:""; };
 const WKORD=["","첫째","둘째","셋째","넷째","다섯째","여섯째"];
-function weekLabel(w){ // 그 주 월~일 날짜범위 "9/28~10/4"
+function weekLabel(w){ // 그 주 월~일 날짜범위 "9/28~10/4" (파일이 월/일요일 어느쪽 명명이든 그 주 월~일 계산)
   const p=(w||"").split("-").map(Number); if(p.length<3) return dot(w);
-  return `${mdShort(w)}~${mdShort(addDays(w,6))}`;
+  const mon=weekStart(w,0); return `${mdShort(mon)}~${mdShort(addDays(mon,6))}`;  // 8/30(일)→8/24~8/30
 }
 function weekLabels(weeks){ const map={}; weeks.forEach(w=>map[w]=weekLabel(w)); return map; }
 
