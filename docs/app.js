@@ -84,15 +84,11 @@ let group="naver";
 const subLabel = s => src==="app" ? s : (SOURCES[src].subs().find(x=>x[0]===s)||[s,s])[1];
 const varLabel = () => { const vs=SOURCES[src].variants; return vs?(vs.find(x=>x[0]===variant)||["",""])[1]:""; };
 const WKORD=["","첫째","둘째","셋째","넷째","다섯째","여섯째"];
-function weekLabel(w){ // 그 주(월~일) 목요일이 속한 달 기준 N월 M째주 (ISO식)
+function weekLabel(w){ // 그 주 월~일 날짜범위 "9/28~10/4"
   const p=(w||"").split("-").map(Number); if(p.length<3) return dot(w);
-  const dt=new Date(p[0],p[1]-1,p[2]), dow=(dt.getDay()+6)%7;      // 월=0..일=6
-  const thu=new Date(p[0],p[1]-1,p[2]-dow+3);                       // 그 주 목요일
-  const f=new Date(thu.getFullYear(),thu.getMonth(),1), fdow=(f.getDay()+6)%7;
-  const firstThu=1+((3-fdow+7)%7), wk=Math.floor((thu.getDate()-firstThu)/7)+1;
-  return `${thu.getMonth()+1}월 ${WKORD[wk]||wk+"째"}주`;
+  return `${mdShort(w)}~${mdShort(addDays(w,6))}`;
 }
-function weekLabels(weeks){ const info=weeks.map(w=>{const p=w.split("-").map(Number);return {w,m:p[1],d:p[2],lab:weekLabel(w)};}); const cnt={}; info.forEach(x=>cnt[x.lab]=(cnt[x.lab]||0)+1); const map={}; info.forEach(x=>map[x.w]=cnt[x.lab]>1?`${x.lab} (${x.m}/${x.d})`:x.lab); return map; }
+function weekLabels(weeks){ const map={}; weeks.forEach(w=>map[w]=weekLabel(w)); return map; }
 
 async function fetchJSON(p){ const r=await fetch(p,{cache:"no-cache"}); if(!r.ok) throw new Error(p+" "+r.status); return r.json(); }
 
