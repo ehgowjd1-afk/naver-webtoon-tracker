@@ -374,9 +374,12 @@ function renderStats(){
                :{lab:"📈 상승 작품",cls:"acc",big:`${up.length}작품`,sub:`하락 ${down.length} · 유지 ${D.filter(d=>d.m===0).length}`}
   ];
   document.getElementById("tiles").innerHTML=tiles.map(t=>`<div class="tile"><div class="lab">${t.lab}</div><div class="big ${t.cls}">${t.big}</div><div class="sub2">${esc(t.sub)}</div></div>`).join("");
-  const nU=up.length,nD=down.length,nS=D.filter(d=>d.m===0).length,tot=D.length||1;
-  document.getElementById("distbar").innerHTML=`<span class="s-up" style="width:${nU/tot*100}%"></span><span class="s-down" style="width:${nD/tot*100}%"></span><span class="s-same" style="width:${nS/tot*100}%"></span>`;
-  document.getElementById("distleg").innerHTML=`<span><i style="background:var(--up)"></i>상승 <b>${nU}</b></span><span><i style="background:var(--down)"></i>하락 <b>${nD}</b></span><span><i style="background:var(--same)"></i>유지 <b>${nS}</b></span>`;
+  // 전체 앱주간 랭킹 작품이 남/여 순위 어디에 올랐나: 남성만 / 동시 / 여성만 (전체 차트 기준)
+  const AL=(APP&&APP.charts["전체"])||[], MS=new Set(((APP&&APP.charts["남성"])||[]).map(x=>x.t)), FS=new Set(((APP&&APP.charts["여성"])||[]).map(x=>x.t));
+  let mo=0,fo=0,bo=0; for(const x of AL){ const im=MS.has(x.t),iff=FS.has(x.t); if(im&&iff)bo++; else if(im)mo++; else if(iff)fo++; }
+  const gtot=AL.length||1, pc=n=>Math.round(n/gtot*100);
+  document.getElementById("distbar").innerHTML=`<span style="background:var(--down);width:${mo/gtot*100}%"></span><span style="background:var(--same);width:${bo/gtot*100}%"></span><span style="background:var(--up);width:${fo/gtot*100}%"></span>`;
+  document.getElementById("distleg").innerHTML=`<span><i style="background:var(--down)"></i>남성순위 <b>${pc(mo)}%</b></span><span><i style="background:var(--same)"></i>동시 <b>${pc(bo)}%</b></span><span><i style="background:var(--up)"></i>여성순위 <b>${pc(fo)}%</b></span>`;
 }
 function renderGap(){
   if(!APP) return;
