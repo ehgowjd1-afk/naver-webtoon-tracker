@@ -11,7 +11,7 @@ let APP=null, WEEKDAY=null, GENRE=null, SERIES=null, PROMO=null, LOOKUP={id:{},n
 let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="", revWeek="";
 let rowsCache=[];
 let DETAILS=null, detailsLoading=null, HISTORY=null, historyLoading=null, KWINDEX=null, seriesLoading=null, promoLoading=null;
-let SERIESDET=null, seriesDetLoading=null, REVHIST=null, revHistLoading=null, SERIESEXTRA=null, EPHIST=null, epHistLoading=null;
+let SERIESDET=null, seriesDetLoading=null, REVHIST=null, revHistLoading=null, SERIESEXTRA=null, EPHIST=null, epHistLoading=null, FAVHIST=null, favHistLoading=null;
 const DAILYPLUS=new Set();
 
 const F_MOVE=[["all","전체"],["up","상승"],["down","하락"]];
@@ -125,6 +125,27 @@ function ensureSeriesDetails(){ if(SERIESDET) return Promise.resolve(); if(!seri
 function ensureRevHist(){ if(REVHIST) return Promise.resolve(); if(!revHistLoading) revHistLoading=fetchJSON("data/revenue_history.json").then(d=>{REVHIST=d;}).catch(()=>{REVHIST={dates:[],works:{}};}); return revHistLoading; }
 /* 웹툰 무료/유료 회차수 날짜별(ep_history.json) — 매출 엑셀 Sheet1 무료/유료 열용. 오늘부터 누적, 없으면 빈값 */
 function ensureEpHist(){ if(EPHIST) return Promise.resolve(); if(!epHistLoading) epHistLoading=fetchJSON("data/ep_history.json").then(d=>{EPHIST=d;}).catch(()=>{EPHIST={dates:[],works:{}};}); return epHistLoading; }
+/* 관심수(favoriteCount) 일별 이력 — fav_history.json {dates:[], works:{titleId:{v:[관심수]}}}. 오늘부터 누적 */
+function ensureFavHist(){ if(FAVHIST) return Promise.resolve(); if(!favHistLoading) favHistLoading=fetchJSON("data/fav_history.json").then(d=>{FAVHIST=d;}).catch(()=>{FAVHIST={dates:[],works:{}};}); return favHistLoading; }
+/* 웹툰(titleId) 관심수 추이 그래프 — 매출 그래프와 동일 구조, 단일 라인 */
+function favChartHtml(id){
+  if(id==null || !FAVHIST || !FAVHIST.works) return "";
+  const w=FAVHIST.works[String(id)]; if(!w||!w.v) return "";
+  const dates=FAVHIST.dates||[], pts=dates.map((dt,i)=>[dt, w.v[i]]).filter(x=>x[1]!=null), n=pts.length;
+  if(!n) return "";
+  const manFmt=v=> v>=10000 ? (Math.round(v/1000)/10)+"만" : v.toLocaleString();
+  if(n<2){ return `<div class="mrevbox"><div class="mrevhd"><span class="mrevt">💜 관심수 추이</span><span class="mrevn">1일차 · 내일부터 그래프가 그려져요</span></div><div class="mrevempty">매일 관심수를 기록해 증가 추이를 쌓아갑니다. 오늘 첫 기록 완료 ✓ (현재 ${pts[0][1].toLocaleString()}명)</div></div>`; }
+  const W=280,H=64,pad=6, xs=i=>pad+(i/(n-1||1))*(W-2*pad);
+  const arr=pts.map(x=>x[1]), mn=Math.min(...arr), mx=Math.max(...arr), span=(mx-mn)||1, ys=v=>H-pad-((v-mn)/span)*(H-2*pad);
+  const d="M"+pts.map((x,i)=>xs(i).toFixed(1)+","+ys(x[1]).toFixed(1)).join(" L");
+  const first=pts[0][1], last=pts[n-1][1], diff=last-first, chg= diff===0?"±0":(diff>0?"▲":"▼")+manFmt(Math.abs(diff));
+  const range=`${pts[0][0].slice(5)}~${pts[n-1][0].slice(5)} · ${n}일`;
+  return `<div class="mrevbox">
+    <div class="mrevhd"><span class="mrevt">💜 관심수 추이</span><span class="mrevn">${range}</span></div>
+    <div class="mrevrow"><div class="mrevlab"><i style="background:var(--accent)"></i>관심수</div><div class="mrevval">${last.toLocaleString()}명 <small>${chg}</small></div></div>
+    <svg viewBox="0 0 ${W} ${H}" class="mrevsvg" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="${xs(n-1).toFixed(1)}" cy="${ys(last).toFixed(1)}" r="2.5" fill="var(--accent)"/></svg>
+  </div>`;
+}
 /* 특정 작품(이름)의 매출 누적 시계열: revenueFor로 시리즈 pn 찾고 REVHIST에서 dl → 총매출, 회차당은 웹툰 총N화(epOverride)로 나눔 */
 function revSeriesFor(name, epOverride){
   const rv=revenueFor(name); if(!rv||!REVHIST||!REVHIST.works) return null;
@@ -563,6 +584,7 @@ function openModal(d){
     </div>
     <div class="mdetail" id="mdetail">${webtoon||isSeries?'<div class="mloading">상세 불러오는 중…</div>':""}</div>
     <div id="mrev" class="mrev" hidden></div>
+    <div id="mfav" class="mrev" hidden></div>
     <div id="mcross"></div>
     <button class="mepbtn" data-trend="1" data-id="${d.id}" data-name="${esc(d.name)}">⬇ 순위 추이 엑셀 (기준별 시트)</button>
     ${webtoon?`<button class="mepbtn" data-id="${d.id}" data-name="${esc(d.name)}">⬇ 회차별 댓글·별점 엑셀(CSV)</button>`:""}
@@ -586,6 +608,8 @@ function openModal(d){
     if(modalSeq!==myTok) return; SNAMEIDX=SNAMEIDX||seriesNameIndex(); const box=document.getElementById("mrev");
     if(box){ const html=revChartHtml(d.name, dowOf(d)); box.innerHTML=html; box.hidden=!html; }
   }); }
+  // 관심수 추이 (웹툰만)
+  if(webtoon){ ensureFavHist().then(()=>{ if(modalSeq!==myTok) return; const fb=document.getElementById("mfav"); if(fb){ const h=favChartHtml(d.id); fb.innerHTML=h; fb.hidden=!h; } }); }
 }
 /* 키워드 클릭 → 그 키워드 작품 전부 */
 function openKeywordList(kw){
@@ -618,6 +642,7 @@ function openWorkModal(w){
     </div>
     <div class="mdetail" id="mdetail"><div class="mloading">상세 불러오는 중…</div></div>
     <div id="mrev" class="mrev" hidden></div>
+    <div id="mfav" class="mrev" hidden></div>
     <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
   document.getElementById("modal").hidden=false;
   const myTok=++modalSeq;
@@ -631,6 +656,7 @@ function openWorkModal(w){
     if(modalSeq!==myTok) return; SNAMEIDX=SNAMEIDX||seriesNameIndex(); const box=document.getElementById("mrev");
     if(box){ const html=revChartHtml(w.name, isWt?dowOf(w):0); box.innerHTML=html; box.hidden=!html; }
   });
+  if(isWt){ ensureFavHist().then(()=>{ if(modalSeq!==myTok) return; const fb=document.getElementById("mfav"); if(fb){ const h=favChartHtml(w.id); fb.innerHTML=h; fb.hidden=!h; } }); }
 }
 /* 전체 작품 검색: 웹툰(LOOKUP) + 시리즈(SERIES) 통합 인덱스 */
 let GINDEX=null;

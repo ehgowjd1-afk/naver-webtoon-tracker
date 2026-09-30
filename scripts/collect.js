@@ -411,6 +411,23 @@ function updateEpHistory(dir, date, details){
   fs.writeFileSync(path.join(dir,"ep_history.json"), JSON.stringify(eh));
   return { dates:eh.dates.length, works:Object.keys(eh.works).length };
 }
+/* 관심수(favoriteCount) 날짜별 이력 → fav_history.json {dates:[], works:{titleId:{v:[관심수]}}}. 오늘부터 누적(다운수처럼 매일 증가 추이) */
+function updateFavHistory(dir, date, details){
+  if(!details){ try{ details=JSON.parse(fs.readFileSync(path.join(dir,"details.json"),"utf8")); }catch(e){ return null; } }
+  let fh={dates:[],works:{}}; try{ fh=JSON.parse(fs.readFileSync(path.join(dir,"fav_history.json"),"utf8")); }catch(e){}
+  if(!fh.dates) fh.dates=[]; if(!fh.works) fh.works={};
+  if(!fh.dates.includes(date)) fh.dates.push(date);
+  const di=fh.dates.indexOf(date);
+  for(const id in details){ const fav=details[id].fav; if(fav==null) continue;
+    const w=fh.works[id]||(fh.works[id]={v:[]});
+    while(w.v.length<di) w.v.push(null);
+    w.v[di]=fav;
+  }
+  for(const id in fh.works){ const w=fh.works[id]; while(w.v.length<=di) w.v.push(null); }
+  const RMAX=150; if(fh.dates.length>RMAX){ const cut=fh.dates.length-RMAX; fh.dates.splice(0,cut); for(const id in fh.works) fh.works[id].v.splice(0,cut); }
+  fs.writeFileSync(path.join(dir,"fav_history.json"), JSON.stringify(fh));
+  return { dates:fh.dates.length, works:Object.keys(fh.works).length };
+}
 
 // 재수집 병합: 빈값이면 기존 유지(로그아웃이 19금/검색작 dl 안 지움)
 function mergeDetail(old, pd, kind){ old=old||{}; return { g:pd.g||old.g||"", k:(pd.k&&pd.k.length)?pd.k:(old.k||[]), dl:pd.dl||old.dl||"", star:pd.star||old.star||"", cmt:pd.cmt||old.cmt||"", ep:pd.ep||old.ep||0, status:pd.status||old.status||"", syn:pd.syn||old.syn||"", kind:kind||pd.kind||old.kind }; }
@@ -420,7 +437,7 @@ function parseSeriesSearch(html){
   let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
   return out;
 }
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, isoDate, mergeDetail, parseSeriesSearch, probeEpByComments };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, mergeDetail, parseSeriesSearch, probeEpByComments };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();
   console.log("collecting", date, "…");
@@ -456,6 +473,7 @@ if (require.main === module) (async ()=>{
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
   fs.writeFileSync(path.join(OUT,"details.json"), JSON.stringify(details));
   try { const eh = updateEpHistory(OUT, date, details); if(eh) console.log("ep(무료/유료) history:", JSON.stringify(eh)); } catch(e){ console.error("ep history failed:", e.message); }
+  try { const fh = updateFavHistory(OUT, date, details); if(fh) console.log("fav(관심수) history:", JSON.stringify(fh)); } catch(e){ console.error("fav history failed:", e.message); }
   fs.writeFileSync(path.join(OUT,"history.json"), JSON.stringify(hist));
 
   try { await collectEpisodes(details, updated); } catch(e){ console.error("episodes failed:", e.message); } // best-effort 백필
