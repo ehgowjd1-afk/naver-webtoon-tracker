@@ -258,6 +258,7 @@ async function collectDetails(existing){
           const list = al.articleList||[]; const maxNo = list.length ? (list[0].no||0) : 0; const chargePub = list.filter(a=>a.charge).length;  // 공개 최신화 no, 공개목록 중 유료(기다무)
           const paid = Math.max(0, (al.totalCount - maxNo) + chargePub);   // 유료 = 미리보기(총-공개최신) + 공개중 유료
           details[id].paid = paid; details[id].free = Math.max(0, al.totalCount - paid);   // 무료 = 총 - 유료
+          try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null) details[id].fav = info.favoriteCount; }catch(e){}  // 관심수 매일 갱신(fav_history 추이용)
         }
         else { details[id].adult = true; const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }
       }catch(e){ if(/ 40\d/.test(e.message)){ details[id].adult = true; try{ const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }catch(_){} } }   // 401/403 = 성인/차단 웹툰(comic.naver 로그아웃 목록차단) → 성인 플래그 + 댓글API 회차수
