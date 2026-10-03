@@ -25,11 +25,12 @@ const PUSH = args.includes("--push");
 const TEST = args.includes("--test");
 const AUTO = args.includes("--auto");
 const CDP = args.includes("--cdp");
+const FAVONLY = args.includes("--favonly"); // 성인 관심수만 갱신(다운수 재수집 스킵, cdpDate 스킵 무시)
 const MAX = Number((args.find(a => a.startsWith("--max=")) || "").split("=")[1] || 30);
 const STATE = path.join(__dirname, ".pw-state.json"); // 연령확인된 세션 상태(쿠키) 저장 — 자동수집 재사용용(git 제외)
 function pushData() {
   try {
-    execSync(`git -C "${ROOT}" add docs/data/series_details.json docs/data/series_extra.json docs/data/revenue_history.json docs/data/details.json docs/data/ep_history.json`, { stdio: "inherit" });
+    execSync(`git -C "${ROOT}" add docs/data/series_details.json docs/data/series_extra.json docs/data/revenue_history.json docs/data/details.json docs/data/ep_history.json docs/data/fav_history.json`, { stdio: "inherit" });
     execSync(`git -C "${ROOT}" commit -m "adult: 성인 시리즈 다운수 ${C.isoDate()}"`, { stdio: "inherit" });
     for (let i = 0; i < 3; i++) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); execSync(`git -C "${ROOT}" push origin main`, { stdio: "inherit" }); console.log("푸시 완료"); return; } catch (e) { console.log("재시도", i + 1); } }
   } catch (e) { console.log("변경 없음/커밋 스킵"); }
@@ -117,7 +118,7 @@ async function collectAdultCharge(page, opts = {}) {
   if (ids.length > cap) ids = ids.slice(0, cap);
   console.log("성인 웹툰 무료/유료 대상 " + ids.length + "개");
   try { await page.goto("https://comic.naver.com/", { waitUntil: "domcontentloaded", timeout: 30000 }); } catch (e) {}
-  let got = 0, done = 0;
+  let got = 0, gotFav = 0, done = 0;
   for (const id of ids) {
     try {
       const al = await page.evaluate(async (id) => { const r = await fetch(`/api/article/list?titleId=${id}&page=1&sort=DESC`, { credentials: "include" }); if (!r.ok) return null; return await r.json(); }, id);
@@ -126,14 +127,17 @@ async function collectAdultCharge(page, opts = {}) {
         const paid = Math.max(0, (T - maxNo) + chargePub);
         det[id].paid = paid; det[id].free = Math.max(0, T - paid); got++;   // ep는 유지(시리즈 회차수 기준)
       }
+      const info = await page.evaluate(async (id) => { try { const r = await fetch(`/api/article/list/info?titleId=${id}`, { credentials: "include" }); if (!r.ok) return null; return await r.json(); } catch (e) { return null; } }, id);
+      if (info && info.favoriteCount != null) { det[id].fav = info.favoriteCount; gotFav++; }   // 성인 관심수 매일 갱신(info는 CDP 로그인세션에서만 열림)
     } catch (e) {}
     done++;
-    if (done % 10 === 0) { fs.writeFileSync(path.join(D, "details.json"), JSON.stringify(det)); console.log("  성인 유무료 " + done + "/" + ids.length + " (" + got + ")"); }
+    if (done % 10 === 0) { fs.writeFileSync(path.join(D, "details.json"), JSON.stringify(det)); console.log("  성인 유무료 " + done + "/" + ids.length + " (유무료 " + got + " · 관심수 " + gotFav + ")"); }
     await sleep(dmin + Math.floor(Math.random() * Math.max(0, dmax - dmin)));
   }
   fs.writeFileSync(path.join(D, "details.json"), JSON.stringify(det));
   const eh = C.updateEpHistory(D, C.isoDate(), det);
-  console.log(`성인 무료/유료 완료: ${got}개 · ep_history ${JSON.stringify(eh)}`);
+  const fh = C.updateFavHistory(D, C.isoDate(), det);
+  console.log(`성인 무료/유료 완료: ${got}개 · 관심수 ${gotFav}개 · ep_history ${JSON.stringify(eh)} · fav_history ${JSON.stringify(fh)}`);
   return got;
 }
 
@@ -147,10 +151,10 @@ async function collectAdultCharge(page, opts = {}) {
     const context = browser.contexts()[0] || await browser.newContext();
     const page = context.pages()[0] || await context.newPage();
     if (PUSH) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); } catch (e) {} }
-    if (readJSON("series_extra.json", {}).cdpDate === C.isoDate()) { console.log("✅ 오늘 이미 성인 수집 완료 — 스킵(하루 1번)"); await browser.close(); return; }
+    if (!FAVONLY && readJSON("series_extra.json", {}).cdpDate === C.isoDate()) { console.log("✅ 오늘 이미 성인 수집 완료 — 스킵(하루 1번)"); await browser.close(); return; }
     if (!(await adultOk(context))) { console.log("❌ 아직 성인 접근 안 됨(연령확인 대기) — 다음 재시도 때 다시 시도합니다."); await browser.close(); process.exit(2); }
-    console.log(`✅ 진짜 크롬 세션으로 성인 접근 OK — 최대 ${MAX}개 수집(2~4.5초 간격)`);
-    const got = await collectAll(page, { cap: MAX, dmin: 2000, dmax: 4500 }); // 매일 전체 갱신용(적당히 천천히)
+    console.log(`✅ 진짜 크롬 세션으로 성인 접근 OK — ${FAVONLY ? "관심수만 갱신" : "최대 " + MAX + "개 수집"}(2~4.5초 간격)`);
+    const got = FAVONLY ? 0 : await collectAll(page, { cap: MAX, dmin: 2000, dmax: 4500 }); // 매일 전체 갱신용(적당히 천천히)
     let gotCharge = 0;
     try { gotCharge = await collectAdultCharge(page, { cap: MAX, dmin: 1500, dmax: 3500 }); } catch (e) { console.log("성인 무료/유료 실패:", e.message); }
     await browser.close(); // CDP는 disconnect만 (사용자 크롬은 그대로 열려있음)
