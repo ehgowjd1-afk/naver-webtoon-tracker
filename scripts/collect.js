@@ -260,8 +260,8 @@ async function collectDetails(existing){
           details[id].paid = paid; details[id].free = Math.max(0, al.totalCount - paid);   // 무료 = 총 - 유료
           try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null) details[id].fav = info.favoriteCount; }catch(e){}  // 관심수 매일 갱신(fav_history 추이용)
         }
-        else { details[id].adult = true; const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }
-      }catch(e){ if(/ 40\d/.test(e.message)){ details[id].adult = true; try{ const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }catch(_){} } }   // 401/403 = 성인/차단 웹툰(comic.naver 로그아웃 목록차단) → 성인 플래그 + 댓글API 회차수
+        else { details[id].adult = true; try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null) details[id].fav = info.favoriteCount; }catch(_){}  const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }
+      }catch(e){ if(/ 40\d/.test(e.message)){ details[id].adult = true; try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null) details[id].fav = info.favoriteCount; }catch(_){}  try{ const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }catch(_){} } }   // 401/403 = 성인/차단 웹툰: article/list는 막혀도 info(관심수)·댓글API(회차수)는 로그아웃으로 열림 → fav 매일 갱신
     }));
     await sleep(50);
   }
