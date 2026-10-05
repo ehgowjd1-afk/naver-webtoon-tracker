@@ -26,6 +26,7 @@ const TEST = args.includes("--test");
 const AUTO = args.includes("--auto");
 const CDP = args.includes("--cdp");
 const FAVONLY = args.includes("--favonly"); // 성인 관심수만 갱신(다운수 재수집 스킵, cdpDate 스킵 무시)
+const PRICEONLY = args.includes("--priceonly"); // 성인 단가(대여/소장 쿠키)만 수집(다운수·무료유료 스킵, cdpDate 스킵 무시)
 const MAX = Number((args.find(a => a.startsWith("--max=")) || "").split("=")[1] || 30);
 const STATE = path.join(__dirname, ".pw-state.json"); // 연령확인된 세션 상태(쿠키) 저장 — 자동수집 재사용용(git 제외)
 function pushData() {
@@ -140,6 +141,43 @@ async function collectAdultCharge(page, opts = {}) {
   console.log(`성인 무료/유료 완료: ${got}개 · 관심수 ${gotFav}개 · ep_history ${JSON.stringify(eh)} · fav_history ${JSON.stringify(fh)}`);
   return got;
 }
+/* 성인 시리즈 단가(대여/소장 쿠키). volumeList.series는 성인작은 로그아웃 차단 → CDP(로그인+연령확인) 세션으로 수집.
+   대여·소장 둘 다 있는 회차의 최빈값(최신화는 대여 미개방일 수 있음). 가격은 거의 안 변해 own 있으면 스킵(1회면 충분). */
+function priceFromVolumes(j) {
+  const vols = (j && j.resultData) || [];
+  if (!vols.length) return null;
+  const mode = (arr, key) => { const c = {}; arr.forEach(v => { const k = key(v); c[k] = (c[k] || 0) + 1; }); return Object.entries(c).sort((a, b) => b[1] - a[1])[0][0]; };
+  const paid = vols.filter(v => v.lendPassCount > 0 && v.buyPassCount > 0);
+  if (paid.length) { const [rent, own] = mode(paid, v => v.lendPassCount + "/" + v.buyPassCount).split("/").map(Number); return { rent, own }; }
+  const buyOnly = vols.filter(v => v.buyPassCount > 0);
+  if (buyOnly.length) { const own = Number(mode(buyOnly, v => String(v.buyPassCount))); return { rent: Math.max(0, own - 2), own }; }
+  return null;
+}
+async function collectAdultPrices(page, opts = {}) {
+  const { cap = Infinity, dmin = 400, dmax = 900 } = opts;
+  const sd = readJSON("series_details.json", {});
+  const extra = readJSON("series_extra.json", { adult: [] });
+  const adult = new Set((extra.adult || []).map(Number));
+  let targets = Object.keys(sd).filter(pn => sd[pn] && sd[pn].kind === "comic" && sd[pn].dl && !sd[pn].own && adult.has(Number(pn)));
+  if (targets.length > cap) targets = targets.slice(0, cap);
+  console.log("성인 단가(쿠키) 대상 " + targets.length + "개");
+  if (!targets.length) return 0;
+  try { await page.goto("https://series.naver.com/", { waitUntil: "domcontentloaded", timeout: 30000 }); } catch (e) {}
+  let got = 0, done = 0;
+  for (const pn of targets) {
+    try {
+      const j = await page.evaluate(async (pn) => { try { const r = await fetch(`/comic/volumeList.series?productNo=${pn}&sortOrder=DESC&totalCount=30`, { credentials: "include" }); if (!r.ok) return null; return await r.json(); } catch (e) { return null; } }, pn);
+      const p = priceFromVolumes(j);
+      if (p) { sd[pn].rent = p.rent; sd[pn].own = p.own; got++; }
+    } catch (e) {}
+    done++;
+    if (done % 20 === 0) { fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd)); console.log("  성인 단가 " + done + "/" + targets.length + " (" + got + ")"); }
+    await sleep(dmin + Math.floor(Math.random() * Math.max(0, dmax - dmin)));
+  }
+  fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd));
+  console.log(`성인 단가 완료: ${got}개`);
+  return got;
+}
 
 (async () => {
   // --cdp: 사용자가 직접 켠 '진짜 크롬'(원격 디버깅)에 붙어서, 사람이 로그인/연령확인한 세션으로 아주 천천히 조금씩 수집 (계정 부담 최소화)
@@ -151,14 +189,16 @@ async function collectAdultCharge(page, opts = {}) {
     const context = browser.contexts()[0] || await browser.newContext();
     const page = context.pages()[0] || await context.newPage();
     if (PUSH) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); } catch (e) {} }
-    if (!FAVONLY && readJSON("series_extra.json", {}).cdpDate === C.isoDate()) { console.log("✅ 오늘 이미 성인 수집 완료 — 스킵(하루 1번)"); await browser.close(); return; }
+    if (!FAVONLY && !PRICEONLY && readJSON("series_extra.json", {}).cdpDate === C.isoDate()) { console.log("✅ 오늘 이미 성인 수집 완료 — 스킵(하루 1번)"); await browser.close(); return; }
     if (!(await adultOk(context))) { console.log("❌ 아직 성인 접근 안 됨(연령확인 대기) — 다음 재시도 때 다시 시도합니다."); await browser.close(); process.exit(2); }
-    console.log(`✅ 진짜 크롬 세션으로 성인 접근 OK — ${FAVONLY ? "관심수만 갱신" : "최대 " + MAX + "개 수집"}(2~4.5초 간격)`);
-    const got = FAVONLY ? 0 : await collectAll(page, { cap: MAX, dmin: 2000, dmax: 4500 }); // 매일 전체 갱신용(적당히 천천히)
+    console.log(`✅ 진짜 크롬 세션으로 성인 접근 OK — ${PRICEONLY ? "단가만 수집" : FAVONLY ? "관심수만 갱신" : "최대 " + MAX + "개 수집"}(2~4.5초 간격)`);
+    const got = (FAVONLY || PRICEONLY) ? 0 : await collectAll(page, { cap: MAX, dmin: 2000, dmax: 4500 }); // 매일 전체 갱신용(적당히 천천히)
     let gotCharge = 0;
-    try { gotCharge = await collectAdultCharge(page, { cap: MAX, dmin: 1500, dmax: 3500 }); } catch (e) { console.log("성인 무료/유료 실패:", e.message); }
+    if (!PRICEONLY) { try { gotCharge = await collectAdultCharge(page, { cap: MAX, dmin: 1500, dmax: 3500 }); } catch (e) { console.log("성인 무료/유료 실패:", e.message); } }
+    let gotPrice = 0;
+    if (!FAVONLY) { try { gotPrice = await collectAdultPrices(page, { cap: 3000 }); } catch (e) { console.log("성인 단가 실패:", e.message); } } // 단가는 1회성(own 있으면 스킵) — 첫 실행에 전부 채움
     await browser.close(); // CDP는 disconnect만 (사용자 크롬은 그대로 열려있음)
-    if (PUSH && (got > 0 || gotCharge > 0)) pushData();
+    if (PUSH && (got > 0 || gotCharge > 0 || gotPrice > 0)) pushData();
     return;
   }
 

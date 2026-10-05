@@ -154,6 +154,38 @@ function parseSeriesDetail(html){
   const cmt = (html.match(/commentCount">([^<]+)</) || [])[1] || "";
   return { g, k, dl, star, cmt, ep, status, syn };
 }
+/* 시리즈 회차별 대여/소장 쿠키 → 대표 단가 등급. volumeList.series(JSON) 사용.
+   최신화(DESC)는 대여 미개방(lendPassCount=0)일 수 있어 → 대여·소장 둘 다 있는 회차의 최빈값을 대표로.
+   그런 회차가 없으면 소장 최빈값에서 대여=소장−2 추정(관측된 표준등급: 3/5, 2/4). 성인작은 로그아웃 차단(JSON 아님)이라 null → CDP에서 수집. */
+function _mode(arr, key){ const c={}; arr.forEach(v=>{ const k=key(v); c[k]=(c[k]||0)+1; }); return Object.entries(c).sort((a,b)=>b[1]-a[1])[0][0]; }
+async function fetchVolumePrice(pn, kind){
+  try{
+    const b = await getText(`https://series.naver.com/${kind}/volumeList.series?productNo=${pn}&sortOrder=DESC&totalCount=30`, UA_PC, "https://series.naver.com/");
+    const j = JSON.parse(b); const vols = j.resultData||[];
+    const paid = vols.filter(v=>v.lendPassCount>0 && v.buyPassCount>0);
+    if(paid.length){ const [rent,own] = _mode(paid, v=>v.lendPassCount+"/"+v.buyPassCount).split("/").map(Number); return {rent, own}; }
+    const buyOnly = vols.filter(v=>v.buyPassCount>0);
+    if(buyOnly.length){ const own = Number(_mode(buyOnly, v=>String(v.buyPassCount))); return {rent:Math.max(0, own-2), own}; }
+    return null;
+  }catch(e){ return null; }
+}
+/* 코믹 시리즈 단가(대여/소장 쿠키)를 없는 것부터 채움. 가격은 거의 안 변해 1회 수집으로 충분 → own 있으면 스킵. 성인은 제외(CDP). */
+async function fillVolumePrices(sd, extra, cap){
+  cap = cap || 500;
+  const adult = new Set(((extra&&extra.adult)||[]).map(String));
+  let n=0, got=0;
+  for(const pn in sd){
+    if(n>=cap) break;
+    const d=sd[pn];
+    if(!d || d.kind!=="comic" || !d.dl || d.own) continue;
+    if(adult.has(String(pn))) continue;
+    n++;
+    const p = await fetchVolumePrice(pn, "comic");
+    if(p){ d.rent=p.rent; d.own=p.own; got++; }
+    await sleep(250);
+  }
+  return got;
+}
 async function collectSeriesDetails(seriesData, existing){
   const det = existing || {};
   const seen = new Set(), order = [];
@@ -438,7 +470,7 @@ function parseSeriesSearch(html){
   let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
   return out;
 }
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, mergeDetail, parseSeriesSearch, probeEpByComments };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, mergeDetail, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();
   console.log("collecting", date, "…");
@@ -469,7 +501,13 @@ if (require.main === module) (async ()=>{
     fs.writeFileSync(path.join(OUT,"series_details.json"), JSON.stringify(sd));
     fs.writeFileSync(path.join(OUT,"series_extra.json"), JSON.stringify(extra));
   } catch(e){ console.error("search-link failed:", e.message); }
-  try { let sd={}; try{ sd=JSON.parse(fs.readFileSync(path.join(OUT,"series_details.json"),"utf8")); }catch(e){} sd=await collectSeriesDetails({comic:s_comic, novel:s_novel}, sd); fs.writeFileSync(path.join(OUT,"series_details.json"), JSON.stringify(sd)); } catch(e){ console.error("series details failed:", e.message); }
+  try {
+    let sd={}; try{ sd=JSON.parse(fs.readFileSync(path.join(OUT,"series_details.json"),"utf8")); }catch(e){}
+    sd=await collectSeriesDetails({comic:s_comic, novel:s_novel}, sd);
+    // 단가(대여/소장 쿠키) — 없는 코믹부터 매일 일부 채움(비성인; 성인은 CDP). 가격은 거의 안 변해 1회로 충분.
+    try{ let extra={}; try{ extra=JSON.parse(fs.readFileSync(path.join(OUT,"series_extra.json"),"utf8")); }catch(e){} const got=await fillVolumePrices(sd, extra, 500); if(got) console.log("단가(쿠키) 신규 수집:", got); }catch(e){ console.error("price fill failed:", e.message); }
+    fs.writeFileSync(path.join(OUT,"series_details.json"), JSON.stringify(sd));
+  } catch(e){ console.error("series details failed:", e.message); }
   try { const rh = updateRevenueHistory(OUT, date); if(rh) console.log("revenue history:", JSON.stringify(rh)); } catch(e){ console.error("revenue history failed:", e.message); }
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
   fs.writeFileSync(path.join(OUT,"details.json"), JSON.stringify(details));
