@@ -147,6 +147,25 @@ function favChartHtml(id){
     <svg viewBox="0 0 ${W} ${H}" class="mrevsvg" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="var(--accent)" stroke-width="2"/><circle cx="${xs(n-1).toFixed(1)}" cy="${ys(last).toFixed(1)}" r="2.5" fill="var(--accent)"/></svg>
   </div>`;
 }
+/* 다운로드수(시리즈 다운수) 일별 추이 — revenue_history dl, 관심수 그래프와 동일 구조 단일 라인 */
+function dlChartHtml(name){
+  const rv=revenueFor(name); if(!rv||!REVHIST||!REVHIST.works) return "";
+  const w=REVHIST.works[rv.pn]; if(!w||!w.dl) return "";
+  const dates=REVHIST.dates||[], pts=dates.map((dt,i)=>[dt, w.dl[i]]).filter(x=>x[1]!=null), n=pts.length;
+  if(!n) return "";
+  const cnt=v=> v>=1e8 ? (Math.round(v/1e6)/100)+"억" : v>=1e4 ? (Math.round(v/1000)/10)+"만" : v.toLocaleString();
+  if(n<2){ return `<div class="mrevbox"><div class="mrevhd"><span class="mrevt">📥 다운로드수 추이</span><span class="mrevn">1일차 · 내일부터 그래프가 그려져요</span></div><div class="mrevempty">매일 시리즈 다운로드수를 기록해 증가 추이를 쌓아갑니다. 오늘 첫 기록 완료 ✓ (현재 ${cnt(pts[0][1])})</div></div>`; }
+  const W=280,H=64,pad=6, xs=i=>pad+(i/(n-1||1))*(W-2*pad);
+  const arr=pts.map(x=>x[1]), mn=Math.min(...arr), mx=Math.max(...arr), span=(mx-mn)||1, ys=v=>H-pad-((v-mn)/span)*(H-2*pad);
+  const d="M"+pts.map((x,i)=>xs(i).toFixed(1)+","+ys(x[1]).toFixed(1)).join(" L");
+  const first=pts[0][1], last=pts[n-1][1], diff=last-first, chg= diff===0?"±0":(diff>0?"▲":"▼")+cnt(Math.abs(diff));
+  const range=`${pts[0][0].slice(5)}~${pts[n-1][0].slice(5)} · ${n}일`;
+  return `<div class="mrevbox">
+    <div class="mrevhd"><span class="mrevt">📥 다운로드수 추이</span><span class="mrevn">${range}</span></div>
+    <div class="mrevrow"><div class="mrevlab"><i style="background:var(--down)"></i>다운로드수</div><div class="mrevval">${cnt(last)} <small>${chg}</small></div></div>
+    <svg viewBox="0 0 ${W} ${H}" class="mrevsvg" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="var(--down)" stroke-width="2"/><circle cx="${xs(n-1).toFixed(1)}" cy="${ys(last).toFixed(1)}" r="2.5" fill="var(--down)"/></svg>
+  </div>`;
+}
 /* 특정 작품(이름)의 매출 누적 시계열: revenueFor로 시리즈 pn 찾고 REVHIST에서 dl → 총매출, 회차당은 웹툰 총N화(epOverride)로 나눔 */
 function revSeriesFor(name, epOverride){
   const rv=revenueFor(name); if(!rv||!REVHIST||!REVHIST.works) return null;
@@ -599,6 +618,7 @@ function openModal(d){
     </div>
     <div class="mdetail" id="mdetail">${webtoon||isSeries?'<div class="mloading">상세 불러오는 중…</div>':""}</div>
     <div id="mrev" class="mrev" hidden></div>
+    <div id="mdl" class="mrev" hidden></div>
     <div id="mfav" class="mrev" hidden></div>
     <div id="mcross"></div>
     <button class="mepbtn" data-trend="1" data-id="${d.id}" data-name="${esc(d.name)}">⬇ 순위 추이 엑셀 (기준별 시트)</button>
@@ -622,6 +642,7 @@ function openModal(d){
   if(webtoon||isSeries){ Promise.all([ensureSeries(), ensureSeriesDetails(), ensureRevHist(), ensureEpHist(), webtoon?ensureDetails():Promise.resolve()]).then(()=>{
     if(modalSeq!==myTok) return; SNAMEIDX=SNAMEIDX||seriesNameIndex(); const box=document.getElementById("mrev");
     if(box){ const html=revChartHtml(d.name, dowOf(d)); box.innerHTML=html; box.hidden=!html; }
+    const dlb=document.getElementById("mdl"); if(dlb){ const dh=dlChartHtml(d.name); dlb.innerHTML=dh; dlb.hidden=!dh; }
   }); }
   // 관심수 추이 (웹툰만)
   if(webtoon){ ensureFavHist().then(()=>{ if(modalSeq!==myTok) return; const fb=document.getElementById("mfav"); if(fb){ const h=favChartHtml(d.id); fb.innerHTML=h; fb.hidden=!h; } }); }
@@ -657,6 +678,7 @@ function openWorkModal(w){
     </div>
     <div class="mdetail" id="mdetail"><div class="mloading">상세 불러오는 중…</div></div>
     <div id="mrev" class="mrev" hidden></div>
+    <div id="mdl" class="mrev" hidden></div>
     <div id="mfav" class="mrev" hidden></div>
     <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
   document.getElementById("modal").hidden=false;
@@ -670,6 +692,7 @@ function openWorkModal(w){
   Promise.all([ensureSeries(), ensureSeriesDetails(), ensureRevHist(), ensureEpHist(), isWt?ensureDetails():Promise.resolve()]).then(()=>{
     if(modalSeq!==myTok) return; SNAMEIDX=SNAMEIDX||seriesNameIndex(); const box=document.getElementById("mrev");
     if(box){ const html=revChartHtml(w.name, isWt?dowOf(w):0); box.innerHTML=html; box.hidden=!html; }
+    const dlb=document.getElementById("mdl"); if(dlb){ const dh=dlChartHtml(w.name); dlb.innerHTML=dh; dlb.hidden=!dh; }
   });
   if(isWt){ ensureFavHist().then(()=>{ if(modalSeq!==myTok) return; const fb=document.getElementById("mfav"); if(fb){ const h=favChartHtml(w.id); fb.innerHTML=h; fb.hidden=!h; } }); }
 }
