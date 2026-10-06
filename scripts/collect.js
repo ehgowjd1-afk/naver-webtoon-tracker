@@ -192,20 +192,25 @@ async function collectSeriesDetails(seriesData, existing){
   for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const cat in (seriesData[kind]||{})[pf]||{}) for(const p in seriesData[kind][pf][cat]) for(const it of seriesData[kind][pf][cat][p]){ if(!seen.has(it.id)){ seen.add(it.id); order.push([it.id, kind]); } }
   const rankedN = order.length;
   // ★랭킹 밖 '검색연동' 작품(신작 등)도 매일 갱신 — 랭킹에만 의존하면 랭킹 밖 작품 다운수가 안 바뀌던 사각지대 해소
+  let adultSet = new Set();
   try{ const se = JSON.parse(fs.readFileSync(path.join(OUT, "series_extra.json"), "utf8"));
     if(se.map) for(const nm in se.map) for(const e of (se.map[nm]||[])){ if(e && e.pn!=null && !seen.has(e.pn)){ seen.add(e.pn); order.push([e.pn, e.kind||"comic"]); } }
+    adultSet = new Set((se.adult||[]).map(String));
   }catch(e){}
   // 매일 전체 재수집(갱신) — 다운수가 새벽 4시(KST)에 바뀌므로. 실패/빈응답이면 기존값 유지.
-  const CAP = 4000; let done = 0, refreshed = 0;
+  const CAP = 4000; let done = 0, refreshed = 0, dlFresh = 0, dlKnown = 0;
   for(const [id, kind] of order){
     if(done >= CAP) break;
-    try{ const h = await getText(`https://series.naver.com/${kind}/detail.series?productNo=${id}`, UA_PC, "https://series.naver.com/"); const pd = parseSeriesDetail(h); pd.kind = kind;
+    let fresh = false;
+    try{ const h = await getText(`https://series.naver.com/${kind}/detail.series?productNo=${id}`, UA_PC, "https://series.naver.com/"); const pd = parseSeriesDetail(h); pd.kind = kind; fresh = !!pd.dl;
       if(pd.dl||pd.g||pd.ep||pd.syn){ det[id] = mergeDetail(det[id], pd, kind); refreshed++; }   // 로그아웃 재수집이 19금/검색작의 기존 dl을 지우지 않도록 병합(빈값이면 기존 유지)
       else if(!det[id]){ det[id] = pd; } }
     catch(e){ /* 기존값 유지 */ }
+    if(!adultSet.has(String(id)) && det[id] && det[id].dl){ dlKnown++; if(fresh) dlFresh++; }   // 정상 판정용: 다운수가 있어야 할 비성인 작품 중 이번에 실제로 긁은 수
     done++; await sleep(80);
   }
-  console.log("series details:", refreshed, "갱신 / 시도", done, "/ 대상", order.length, "(랭킹", rankedN, "+ 연동", order.length - rankedN, ") / 총", Object.keys(det).length);
+  collectSeriesDetails.stats = { dlFresh, dlKnown, done, order: order.length };
+  console.log("series details:", refreshed, "갱신 / 시도", done, "/ 대상", order.length, "(랭킹", rankedN, "+ 연동", order.length - rankedN, ") / 총", Object.keys(det).length, "/ 다운수 새로 긁음", dlFresh, "/", dlKnown);
   return det;
 }
 
@@ -267,7 +272,7 @@ async function collectDetails(existing){
           cp: (function(){ const p = cpName.includes("_") ? cpName.split("_")[0] : cpName; return p==="다중" ? "여러 제작사" : p; })(),
           age: (d.age&&d.age.description) || "",
           day: d.publishDescription || "",
-          fav: d.favoriteCount || 0,
+          fav: d.favoriteCount || 0, favAt: runDate(),
           ep, launch,
           dailyplus: ((d.gfpAdCustomParam||{}).dailyPlusYn === "Y"),
           syn: (d.synopsis||"").replace(/\s+/g," ").trim().slice(0,220),
@@ -289,11 +294,11 @@ async function collectDetails(existing){
         if(al.totalCount){ details[id].ep = al.totalCount; rf++;
           const list = al.articleList||[]; const maxNo = list.length ? (list[0].no||0) : 0; const chargePub = list.filter(a=>a.charge).length;  // 공개 최신화 no, 공개목록 중 유료(기다무)
           const paid = Math.max(0, (al.totalCount - maxNo) + chargePub);   // 유료 = 미리보기(총-공개최신) + 공개중 유료
-          details[id].paid = paid; details[id].free = Math.max(0, al.totalCount - paid);   // 무료 = 총 - 유료
-          try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null) details[id].fav = info.favoriteCount; }catch(e){}  // 관심수 매일 갱신(fav_history 추이용)
+          details[id].paid = paid; details[id].free = Math.max(0, al.totalCount - paid); details[id].epAt = runDate();   // 무료 = 총 - 유료 · 오늘 긁음 스탬프
+          try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null){ details[id].fav = info.favoriteCount; details[id].favAt = runDate(); } }catch(e){}  // 관심수 매일 갱신(fav_history 추이용)
         }
-        else { details[id].adult = true; try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null) details[id].fav = info.favoriteCount; }catch(_){}  const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }
-      }catch(e){ if(/ 40\d/.test(e.message)){ details[id].adult = true; try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null) details[id].fav = info.favoriteCount; }catch(_){}  try{ const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }catch(_){} } }   // 401/403 = 성인/차단 웹툰: article/list는 막혀도 info(관심수)·댓글API(회차수)는 로그아웃으로 열림 → fav 매일 갱신
+        else { details[id].adult = true; try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null){ details[id].fav = info.favoriteCount; details[id].favAt = runDate(); } }catch(_){}  const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }
+      }catch(e){ if(/ 40\d/.test(e.message)){ details[id].adult = true; try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null){ details[id].fav = info.favoriteCount; details[id].favAt = runDate(); } }catch(_){}  try{ const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }catch(_){} } }   // 401/403 = 성인/차단 웹툰: article/list는 막혀도 info(관심수)·댓글API(회차수)는 로그아웃으로 열림 → fav 매일 갱신
     }));
     await sleep(50);
   }
@@ -409,32 +414,54 @@ function updateHistory(hist, date, todayBases){
 }
 
 function isoDate(){ return new Date(Date.now()+9*3600*1000).toISOString().slice(0,10); }
+/* 데이터 날짜: 네이버 다운수는 새벽 4시(KST)에 전날분까지 갱신되므로 00:00~03:59 실행은 아직 전날 데이터 → 전날 날짜로 기록(KST−4시간 = UTC+5) */
+const dataDate = ms => new Date(ms + 5*3600*1000).toISOString().slice(0,10);
+/* 이번 실행의 히스토리 기준 날짜 — 프로세스당 1회 고정. 수집 스탬프(at/favAt/epAt)와 히스토리 기록 날짜를 같은 값으로 맞춤(실행 중 자정을 넘겨도 어긋나지 않게) */
+let _runDate = null;
+function runDate(){ return _runDate || (_runDate = dataDate(Date.now())); }
+/* 클라우드 본수집이 정상인지: 시리즈 상세에서 다운수를 새로 긁은 비율(성인 제외)이 절반 이상일 때만 그 날짜를 '완료'로 표시 */
+const fullRunOK = st => !!(st && st.dlKnown > 0 && st.dlFresh >= st.dlKnown * 0.5);
 function parseDlNum(s){ if(!s) return 0; s=String(s).replace(/,/g,""); let n=0,m; if(m=s.match(/([\d.]+)\s*억/)) n+=parseFloat(m[1])*1e8; if(m=s.match(/([\d.]+)\s*만/)) n+=parseFloat(m[1])*1e4; if(m=s.match(/([\d.]+)\s*천/)) n+=parseFloat(m[1])*1e3; if(!n) n=parseFloat(s)||0; return Math.round(n); }
+/* 히스토리 파일 읽기: 없으면 빈 구조. 있는데 못 읽으면(병합 충돌 표시 등) 예외 → 호출측이 덮어쓰지 않음(빈 기록으로 수백 일치를 날리는 사고 방지) */
+function readHistory(fp){
+  if(!fs.existsSync(fp)) return { dates:[], works:{} };
+  const h = JSON.parse(fs.readFileSync(fp, "utf8"));
+  if(!h || typeof h!=="object" || !Array.isArray(h.dates) || !h.works) throw new Error(fp+" 형식 이상 — 덮어쓰지 않음");
+  return h;
+}
 // 매출 누적 히스토리: 시리즈 productNo 기준 dl(다운수)+ep(회차수)만 저장 → 총매출/회차당은 클라에서 계산
-function updateRevenueHistory(dir, date){
+// ★오늘 실제로 새로 긁은 작품(series_details.at === date)만 기록. 안 긁은 작품에 전날 값을 베껴 쓰지 않고 칸을 비워 둠
+//   → 프론트가 앞뒤 실제 수집값으로 보간하거나, 뒤쪽 값이 아직 없으면 그 주를 미완성으로 처리(오전 부분수집 착시·수집공백 계단 방지)
+// opts.full: 클라우드 본수집이 정상 완료(fullRunOK) — 이 날짜를 rh.lastFull로 표시(프론트 주 선택 목록 기준)
+function updateRevenueHistory(dir, date, opts){
+  opts = opts || {};
   let sd={}; try{ sd=JSON.parse(fs.readFileSync(path.join(dir,"series_details.json"),"utf8")); }catch(e){ return null; }
-  let rh={dates:[],works:{}}; try{ rh=JSON.parse(fs.readFileSync(path.join(dir,"revenue_history.json"),"utf8")); }catch(e){}
+  const rh = readHistory(path.join(dir,"revenue_history.json"));   // 파일이 깨져 있으면 예외 → 덮어쓰지 않음(150일치 유실 방지)
   if(!rh.dates) rh.dates=[]; if(!rh.works) rh.works={};
   if(!rh.dates.includes(date)) rh.dates.push(date);
   const di=rh.dates.indexOf(date);
+  let wrote=0;
   for(const pn in sd){ const d=sd[pn], dl=parseDlNum(d.dl), ep=d.ep; if(!dl||!ep) continue;
+    if(d.at!==date) continue;   // 오늘 안 긁은 작품 → 기록 안 함(베껴 쓰기 금지)
     const w=rh.works[pn]||(rh.works[pn]={dl:[],ep:[]});
     while(w.dl.length<di){ w.dl.push(null); w.ep.push(null); }
-    w.dl[di]=dl; w.ep[di]=ep;
+    w.dl[di]=dl; w.ep[di]=ep; wrote++;
   }
   for(const pn in rh.works){ const w=rh.works[pn]; while(w.dl.length<=di){ w.dl.push(null); w.ep.push(null); } }
+  if(opts.full && wrote>0){ if(!rh.lastFull || date>rh.lastFull) rh.lastFull=date; }   // 정상 판정은 호출측(main: fullRunOK — 이번 실행이 실제로 긁은 비율)에서
   const RMAX=150; if(rh.dates.length>RMAX){ const cut=rh.dates.length-RMAX; rh.dates.splice(0,cut); for(const pn in rh.works){ rh.works[pn].dl.splice(0,cut); rh.works[pn].ep.splice(0,cut); } }
   fs.writeFileSync(path.join(dir,"revenue_history.json"), JSON.stringify(rh));
-  return { dates:rh.dates.length, works:Object.keys(rh.works).length };
+  return { dates:rh.dates.length, works:Object.keys(rh.works).length, wrote, lastFull:rh.lastFull||null };
 }
 /* 웹툰 무료/유료 회차수 날짜별 기록 → ep_history.json {dates:[], works:{titleId:{f:[무료],p:[유료]}}}. 매출 엑셀 Sheet1의 무료/유료 열용. 오늘부터 누적(성인작은 article/list 막혀 제외) */
 function updateEpHistory(dir, date, details){
   if(!details){ try{ details=JSON.parse(fs.readFileSync(path.join(dir,"details.json"),"utf8")); }catch(e){ return null; } }
-  let eh={dates:[],works:{}}; try{ eh=JSON.parse(fs.readFileSync(path.join(dir,"ep_history.json"),"utf8")); }catch(e){}
+  const eh = readHistory(path.join(dir,"ep_history.json"));   // 깨져 있으면 예외 → 덮어쓰지 않음
   if(!eh.dates) eh.dates=[]; if(!eh.works) eh.works={};
   if(!eh.dates.includes(date)) eh.dates.push(date);
   const di=eh.dates.indexOf(date);
   for(const id in details){ const d=details[id]; if(d.free==null && d.paid==null) continue;
+    if(d.epAt!==date) continue;   // 오늘 무료/유료를 새로 긁은 작품만 기록(베껴 쓰기 금지)
     const w=eh.works[id]||(eh.works[id]={f:[],p:[]});
     while(w.f.length<di){ w.f.push(null); w.p.push(null); }
     w.f[di]=d.free!=null?d.free:null; w.p[di]=d.paid!=null?d.paid:null;
@@ -447,11 +474,12 @@ function updateEpHistory(dir, date, details){
 /* 관심수(favoriteCount) 날짜별 이력 → fav_history.json {dates:[], works:{titleId:{v:[관심수]}}}. 오늘부터 누적(다운수처럼 매일 증가 추이) */
 function updateFavHistory(dir, date, details){
   if(!details){ try{ details=JSON.parse(fs.readFileSync(path.join(dir,"details.json"),"utf8")); }catch(e){ return null; } }
-  let fh={dates:[],works:{}}; try{ fh=JSON.parse(fs.readFileSync(path.join(dir,"fav_history.json"),"utf8")); }catch(e){}
+  const fh = readHistory(path.join(dir,"fav_history.json"));   // 깨져 있으면 예외 → 덮어쓰지 않음
   if(!fh.dates) fh.dates=[]; if(!fh.works) fh.works={};
   if(!fh.dates.includes(date)) fh.dates.push(date);
   const di=fh.dates.indexOf(date);
   for(const id in details){ const fav=details[id].fav; if(fav==null) continue;
+    if(details[id].favAt!==date) continue;   // 오늘 관심수를 새로 긁은 작품만 기록(베껴 쓰기 금지)
     const w=fh.works[id]||(fh.works[id]={v:[]});
     while(w.v.length<di) w.v.push(null);
     w.v[di]=fav;
@@ -466,6 +494,7 @@ function updateFavHistory(dir, date, details){
 function mergeDetail(old, pd, kind){ old=old||{}; const m={ g:pd.g||old.g||"", k:(pd.k&&pd.k.length)?pd.k:(old.k||[]), dl:pd.dl||old.dl||"", star:pd.star||old.star||"", cmt:pd.cmt||old.cmt||"", ep:pd.ep||old.ep||0, status:pd.status||old.status||"", syn:pd.syn||old.syn||"", kind:kind||pd.kind||old.kind };
   const rent=(pd.rent!=null)?pd.rent:old.rent; if(rent!=null) m.rent=rent;   // 단가(대여/소장 쿠키) 보존 — 재수집 때 지우지 않음
   const own=(pd.own!=null)?pd.own:old.own; if(own!=null) m.own=own;
+  const at = pd.dl ? runDate() : old.at; if(at) m.at=at;   // 다운수를 이번에 새로 긁었으면 "오늘 긁음" 스탬프 — updateRevenueHistory는 스탬프가 오늘인 작품만 기록
   return m; }
 // 시리즈 통합검색 결과 파싱 → [{pn, kind, title}]
 function parseSeriesSearch(html){
@@ -473,9 +502,10 @@ function parseSeriesSearch(html){
   let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
   return out;
 }
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, mergeDetail, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices };
 if (require.main === module) (async ()=>{
-  const updated=new Date().toISOString(), date=isoDate();
+  const updated=new Date().toISOString(), date=isoDate();   // 랭킹·요일·장르 기록 날짜(기존 그대로)
+  const hdate=runDate();   // 다운수·관심수·무료유료 히스토리 날짜(새벽 4시 전 실행이면 전날) — 수집 스탬프와 같은 값
   console.log("collecting", date, "…");
   // 웹 먼저(lookup 채움) → 앱은 lookup 참조
   const web_wd = await webWeekday();
@@ -511,11 +541,12 @@ if (require.main === module) (async ()=>{
     try{ let extra={}; try{ extra=JSON.parse(fs.readFileSync(path.join(OUT,"series_extra.json"),"utf8")); }catch(e){} const got=await fillVolumePrices(sd, extra, 500); if(got) console.log("단가(쿠키) 신규 수집:", got); }catch(e){ console.error("price fill failed:", e.message); }
     fs.writeFileSync(path.join(OUT,"series_details.json"), JSON.stringify(sd));
   } catch(e){ console.error("series details failed:", e.message); }
-  try { const rh = updateRevenueHistory(OUT, date); if(rh) console.log("revenue history:", JSON.stringify(rh)); } catch(e){ console.error("revenue history failed:", e.message); }
+  try { const full = fullRunOK(collectSeriesDetails.stats);   // 본수집 정상 여부 = 이번 실행이 비성인 다운수를 절반 이상 실제로 긁었는지
+    const rh = updateRevenueHistory(OUT, hdate, {full}); if(rh) console.log("revenue history:", JSON.stringify(rh), "full:", full, JSON.stringify(collectSeriesDetails.stats||null)); } catch(e){ console.error("revenue history failed:", e.message); }   // 오늘 긁은 작품만 기록 + 정상이면 완료 날짜(lastFull) 표시
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
   fs.writeFileSync(path.join(OUT,"details.json"), JSON.stringify(details));
-  try { const eh = updateEpHistory(OUT, date, details); if(eh) console.log("ep(무료/유료) history:", JSON.stringify(eh)); } catch(e){ console.error("ep history failed:", e.message); }
-  try { const fh = updateFavHistory(OUT, date, details); if(fh) console.log("fav(관심수) history:", JSON.stringify(fh)); } catch(e){ console.error("fav history failed:", e.message); }
+  try { const eh = updateEpHistory(OUT, hdate, details); if(eh) console.log("ep(무료/유료) history:", JSON.stringify(eh)); } catch(e){ console.error("ep history failed:", e.message); }
+  try { const fh = updateFavHistory(OUT, hdate, details); if(fh) console.log("fav(관심수) history:", JSON.stringify(fh)); } catch(e){ console.error("fav history failed:", e.message); }
   fs.writeFileSync(path.join(OUT,"history.json"), JSON.stringify(hist));
 
   try { await collectEpisodes(details, updated); } catch(e){ console.error("episodes failed:", e.message); } // best-effort 백필

@@ -38,6 +38,7 @@ function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^
 
 (async () => {
   const t0 = Date.now();
+  const DATE = C.runDate();   // 이번 실행 기준 날짜 고정 — 새로 긁은 작품의 "오늘 긁음" 스탬프와 히스토리 기록 날짜를 일치시킴
   if (PUSH) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); } catch (e) { console.log("초기 pull 스킵:", e.message); } }
   console.log(`로컬수집 시작 · 쿠키 ${COOKIE ? "있음(19금 다운수 갱신 가능)" : "없음(비성인만)"} · push=${PUSH}`);
 
@@ -98,13 +99,13 @@ function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^
   console.log(`owned 다운수 갱신: ${refreshed}/${owned.length}${COOKIE ? ` (신규 확보 ${newDl})` : ""}`);
 
   flush();
-  const rh = C.updateRevenueHistory(D, C.isoDate());
+  const rh = C.updateRevenueHistory(D, DATE);   // 이번에 새로 긁은 작품(검색연동·owned)만 기록 — 안 긁은 랭킹작에 어제 값을 베껴 쓰지 않음
   console.log(`저장 완료 · 매출히스토리 ${JSON.stringify(rh)} · 연동맵 ${Object.keys(extra.map).length}작품 · owned ${extra.owned.length} · 이번검색 ${searched}건 · ${((Date.now() - t0) / 1000).toFixed(0)}s`);
 
   if (PUSH) {
     try {
       execSync(`git -C "${ROOT}" add docs/data/series_details.json docs/data/series_extra.json docs/data/revenue_history.json`, { stdio: "inherit" });
-      execSync(`git -C "${ROOT}" commit -m "local: 시리즈 검색연동+다운수 갱신 ${C.isoDate()}"`, { stdio: "inherit" });
+      execSync(`git -C "${ROOT}" commit -m "local: 시리즈 검색연동+다운수 갱신 ${DATE}"`, { stdio: "inherit" });
       for (let i = 0; i < 3; i++) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); execSync(`git -C "${ROOT}" push origin main`, { stdio: "inherit" }); console.log("푸시 완료"); break; } catch (e) { console.log("재시도", i + 1); } }
     } catch (e) { console.log("변경 없음/커밋 스킵"); }
   }
