@@ -463,7 +463,10 @@ function updateFavHistory(dir, date, details){
 }
 
 // 재수집 병합: 빈값이면 기존 유지(로그아웃이 19금/검색작 dl 안 지움)
-function mergeDetail(old, pd, kind){ old=old||{}; return { g:pd.g||old.g||"", k:(pd.k&&pd.k.length)?pd.k:(old.k||[]), dl:pd.dl||old.dl||"", star:pd.star||old.star||"", cmt:pd.cmt||old.cmt||"", ep:pd.ep||old.ep||0, status:pd.status||old.status||"", syn:pd.syn||old.syn||"", kind:kind||pd.kind||old.kind }; }
+function mergeDetail(old, pd, kind){ old=old||{}; const m={ g:pd.g||old.g||"", k:(pd.k&&pd.k.length)?pd.k:(old.k||[]), dl:pd.dl||old.dl||"", star:pd.star||old.star||"", cmt:pd.cmt||old.cmt||"", ep:pd.ep||old.ep||0, status:pd.status||old.status||"", syn:pd.syn||old.syn||"", kind:kind||pd.kind||old.kind };
+  const rent=(pd.rent!=null)?pd.rent:old.rent; if(rent!=null) m.rent=rent;   // 단가(대여/소장 쿠키) 보존 — 재수집 때 지우지 않음
+  const own=(pd.own!=null)?pd.own:old.own; if(own!=null) m.own=own;
+  return m; }
 // 시리즈 통합검색 결과 파싱 → [{pn, kind, title}]
 function parseSeriesSearch(html){
   const out=[], re=/<a href="\/(comic|novel)\/detail\.series\?productNo=(\d+)" class="N=a:(?:com|nov)\.title">([\s\S]*?)<\/a>/g;
