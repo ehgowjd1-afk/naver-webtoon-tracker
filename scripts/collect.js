@@ -292,13 +292,12 @@ async function collectDetails(existing){
         const al = await getJSON(`https://comic.naver.com/api/article/list?titleId=${id}&page=1&sort=DESC`, `https://comic.naver.com/webtoon/list?titleId=${id}`);   // DESC: 총화 + 최신공개화 + charge(유료) 한 번에
         details[id].adult = false;   // article/list 열림 = 비성인
         if(al.totalCount){ details[id].ep = al.totalCount; rf++;
-          const list = al.articleList||[]; const maxNo = list.length ? (list[0].no||0) : 0; const chargePub = list.filter(a=>a.charge).length;  // 공개 최신화 no, 공개목록 중 유료(기다무)
-          const paid = Math.max(0, (al.totalCount - maxNo) + chargePub);   // 유료 = 미리보기(총-공개최신) + 공개중 유료
-          details[id].paid = paid; details[id].free = Math.max(0, al.totalCount - paid); details[id].epAt = runDate();   // 무료 = 총 - 유료 · 오늘 긁음 스탬프
+          const sp = await episodeSplit(al, p => getJSON(`https://comic.naver.com/api/article/list?titleId=${id}&page=${p}&sort=DESC`, `https://comic.naver.com/webtoon/list?titleId=${id}`));   // 번호 빠짐(결번) 있어도 맞는 무료/유료
+          details[id].paid = sp.paid; details[id].free = sp.free; details[id].epAt = runDate();   // 오늘 긁음 스탬프
           try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null){ details[id].fav = info.favoriteCount; details[id].favAt = runDate(); } }catch(e){}  // 관심수 매일 갱신(fav_history 추이용)
         }
-        else { details[id].adult = true; try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null){ details[id].fav = info.favoriteCount; details[id].favAt = runDate(); } }catch(_){}  const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }
-      }catch(e){ if(/ 40\d/.test(e.message)){ details[id].adult = true; try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null){ details[id].fav = info.favoriteCount; details[id].favAt = runDate(); } }catch(_){}  try{ const ep = await probeEpByComments(id); if(ep){ details[id].ep = ep; rfa++; } }catch(_){} } }   // 401/403 = 성인/차단 웹툰: article/list는 막혀도 info(관심수)·댓글API(회차수)는 로그아웃으로 열림 → fav 매일 갱신
+        else { details[id].adult = true; try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null){ details[id].fav = info.favoriteCount; details[id].favAt = runDate(); } }catch(_){}  const ep = await probeEpByComments(id); if(ep){ details[id].ep = adultEp(details[id], ep); details[id].cmtNo = ep; rfa++; } }
+      }catch(e){ if(/ 40\d/.test(e.message)){ details[id].adult = true; try{ const info = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`); if(info && info.favoriteCount!=null){ details[id].fav = info.favoriteCount; details[id].favAt = runDate(); } }catch(_){}  try{ const ep = await probeEpByComments(id); if(ep){ details[id].ep = adultEp(details[id], ep); details[id].cmtNo = ep; rfa++; } }catch(_){} } }   // 401/403 = 성인/차단 웹툰: article/list는 막혀도 info(관심수)·댓글API(회차수)는 로그아웃으로 열림 → fav 매일 갱신
     }));
     await sleep(50);
   }
@@ -306,7 +305,26 @@ async function collectDetails(existing){
   return details;
 }
 
-/* 평균 댓글수: 각 작품 최근 5회차 댓글수(activePostCount) 평균 — wcc 배치 API. 매일 갱신 */
+/* 회차 구성: 총화(미리보기 포함)·유료·무료·공개 최신 번호·결번 수. 회차 번호가 1부터 빠짐없이 이어진다고 가정하지 않음
+   (예: 울어봐 54번 결번 → 최신 88화가 no=89). 미리보기 = 총화 − 공개 회차수(pageInfo.totalRows), 유료 = 미리보기 + 공개목록 중 charge(기다무 등).
+   최신 페이지(20개)가 전부 유료면 다음 페이지까지 셈(완결 후 유료화 작품 — 예전엔 20화에서 잘림, 최대 80페이지). fetchPage(p) = 같은 작품 DESC p페이지 JSON(로그아웃 getJSON / 성인은 CDP fetch). */
+async function episodeSplit(al, fetchPage){
+  const T = al.totalCount || 0, pi = al.pageInfo || {}, folder = al.chargeFolderArticleList || [];
+  const previews = Math.max(0, pi.totalRows != null ? T - pi.totalRows : folder.length);
+  let list = al.articleList || [], pubPaid = list.filter(a => a.charge).length;
+  for(let p = 2; list.length && list.every(a => a.charge) && p <= Math.min(pi.totalPages || 1, 80); p++){
+    let nx = null; try{ nx = await fetchPage(p); }catch(e){}
+    list = (nx && nx.articleList) || []; pubPaid += list.filter(a => a.charge).length;
+  }
+  const paid = Math.min(T, previews + pubPaid);
+  const pubNo = ((al.articleList || [])[0] || {}).no || 0;
+  const maxNo = Math.max(pubNo, ...folder.map(a => a.no || 0));
+  return { T, paid, free: T - paid, pubNo, gap: Math.max(0, maxNo - T) };
+}
+/* 성인작 총화(로그아웃): 댓글 추정치는 '댓글 달린 최대 번호'라 결번이면 +1, 최신 유료화에 댓글 없으면 −1로 틀림.
+   성인 수집(CDP 로그인)이 매일 넣는 실제 총화(ep)·결번 수(epGap)를 기준으로 두고, 결번만큼 뺀 추정치가 더 클 때만(새 회차) 올림. 다음 CDP 수집이 다시 실제값으로 맞춤.
+   평균 댓글(collectComments)은 예전처럼 댓글 추정 번호(cmtNo) 기준 최근 5화. */
+function adultEp(det, probe){ const est = probe - (det.epGap || 0); return Math.max(det.ep || 0, est); }
 /* 성인/차단 웹툰 회차수: article/list가 막혔을 때 댓글 count API로 최대 회차 추정(로그아웃 공개). 미리보기 제외 공개회차 기준. */
 async function probeEpByComments(id){
   let maxNo=0;
@@ -321,6 +339,7 @@ async function probeEpByComments(id){
   }
   return maxNo;
 }
+/* 평균 댓글수: 각 작품 최근 5회차 댓글수(activePostCount) 평균 — wcc 배치 API. 매일 갱신 */
 async function collectComments(details){
   const ids = Object.keys(details).filter(id => details[id].ep > 0).map(Number);
   const B = 10; // 작품 10개 = pageId 50개/배치
@@ -328,7 +347,7 @@ async function collectComments(details){
   for(let i=0;i<ids.length;i+=B){
     const batch = ids.slice(i,i+B);
     const pageIds = [];
-    for(const id of batch){ const ep = details[id].ep; for(let no=Math.max(1,ep-4); no<=ep; no++) pageIds.push(`webtoon_${id}_${no}`); }
+    for(const id of batch){ const ep = (details[id].adult && details[id].cmtNo) || details[id].ep; for(let no=Math.max(1,ep-4); no<=ep; no++) pageIds.push(`webtoon_${id}_${no}`); }
     const qs = pageIds.map(p=>"pageIds="+p).join("&");
     try{
       const r = await fetch(`https://comic.naver.com/comment/api/community/v1/pages/activity/count/?${qs}`, { headers:{ "User-Agent":UA_PC, "Service-Ticket-Id":"comic_webtoon", "Referer":"https://comic.naver.com/" } });
@@ -502,7 +521,7 @@ function parseSeriesSearch(html){
   let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
   return out;
 }
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, episodeSplit, adultEp, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();   // 랭킹·요일·장르 기록 날짜(기존 그대로)
   const hdate=runDate();   // 다운수·관심수·무료유료 히스토리 날짜(새벽 4시 전 실행이면 전날) — 수집 스탬프와 같은 값

@@ -123,11 +123,15 @@ async function collectAdultCharge(page, opts = {}) {
   let got = 0, gotFav = 0, done = 0;
   for (const id of ids) {
     try {
-      const al = await page.evaluate(async (id) => { const r = await fetch(`/api/article/list?titleId=${id}&page=1&sort=DESC`, { credentials: "include" }); if (!r.ok) return null; return await r.json(); }, id);
+      const listPage = async (p) => {   // 2페이지부터는 사람 속도로(완결 후 유료화 작품만 여러 페이지)
+        if (p > 1) await sleep(400 + Math.floor(Math.random() * 500));
+        return page.evaluate(async ([id, p]) => { const r = await fetch(`/api/article/list?titleId=${id}&page=${p}&sort=DESC`, { credentials: "include" }); if (!r.ok) return null; return await r.json(); }, [id, p]);
+      };
+      const al = await listPage(1);
       if (al && al.totalCount) {
-        const T = al.totalCount, list = al.articleList || [], maxNo = list.length ? (list[0].no || 0) : 0, chargePub = list.filter(a => a.charge).length;
-        const paid = Math.max(0, (T - maxNo) + chargePub);
-        det[id].paid = paid; det[id].free = Math.max(0, T - paid); det[id].epAt = RUN_DATE; got++;   // ep는 유지(시리즈 회차수 기준) · 오늘 긁음 스탬프
+        const sp = await C.episodeSplit(al, listPage);   // 결번 있어도 맞는 무료/유료
+        det[id].ep = sp.T; det[id].epGap = sp.gap;        // 사이트 '총 N화' = 로그인 회차목록 총개수(로그아웃 댓글 추정은 결번·무댓글 최신화로 ±1 틀림) · 결번 수는 클라우드 추정 보정용
+        det[id].paid = sp.paid; det[id].free = sp.free; det[id].epAt = RUN_DATE; got++;   // 오늘 긁음 스탬프
       }
       const info = await page.evaluate(async (id) => { try { const r = await fetch(`/api/article/list/info?titleId=${id}`, { credentials: "include" }); if (!r.ok) return null; return await r.json(); } catch (e) { return null; } }, id);
       if (info && info.favoriteCount != null) { det[id].fav = info.favoriteCount; det[id].favAt = RUN_DATE; gotFav++; }   // 성인 관심수 매일 갱신(info는 CDP 로그인세션에서만 열림)
