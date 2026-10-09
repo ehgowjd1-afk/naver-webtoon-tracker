@@ -33,6 +33,24 @@ function mapWeb(list){
 async function webWeekday(){ const o={}; for(const w of WEEKDAYS){ const d=await getJSON(`https://comic.naver.com/api/webtoon/titlelist/weekday?week=${w}&order=user`,"https://comic.naver.com/webtoon/weekday"); o[w]=mapWeb(d.titleList||[]); await sleep(120);} return o; }
 async function webGenre(){ const o={}; for(const g of GENRES){ try{ const d=await getJSON(`https://comic.naver.com/api/webtoon/titlelist/genre?genre=${g}&order=user`,"https://comic.naver.com/webtoon?tab=genre"); o[g]=mapWeb(d.titleList||[]);}catch(e){o[g]=[];console.error("webGenre",g,e.message);} await sleep(120);} return o; }
 
+/* 앱 랭킹은 id만 줌 → 이름·썸네일·작가는 PC 목록(idL)에서 가져오는데, 완결작 등 PC 연재/장르 목록에 없는 작품은 비어서 사이트에 '#titleId'로 보였음.
+   빠진 id만 info API(로그아웃, 성인작도 열림)로 채움 → lookup.json·상세(collectDetails)까지 같이 생김 */
+async function fillMissingTitles(lists){
+  const miss = [...new Set(lists.flat().map(r => r && r.id).filter(id => id != null && !idL[id]))];
+  let got = 0;
+  for(let i=0;i<miss.length;i+=4){
+    await Promise.all(miss.slice(i,i+4).map(async id=>{ try{
+      const d = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`);
+      if(!d || !d.titleName) return;
+      idL[id] = [d.titleName, d.thumbnailUrl||"", (d.communityArtists||[]).map(a=>a.name).filter(Boolean).join(" / ")];
+      if(!nameL[d.titleName]) nameL[d.titleName] = Number(id);
+      got++;
+    }catch(e){} }));
+    await sleep(80);
+  }
+  console.log("앱 랭킹 전용 작품(완결작 등) 이름 보충:", got, "/", miss.length);
+}
+
 /* 앱(m.comic HTML): nclk_v2(event,'lst.list','id','rank') → {r,id} (제목 등은 프론트에서 lookup) */
 function parseMobile(html, startMarker){
   const s = startMarker ? html.slice(Math.max(0, html.indexOf(startMarker))) : html;
@@ -521,7 +539,7 @@ function parseSeriesSearch(html){
   let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
   return out;
 }
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, episodeSplit, adultEp, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, episodeSplit, fillMissingTitles, adultEp, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();   // 랭킹·요일·장르 기록 날짜(기존 그대로)
   const hdate=runDate();   // 다운수·관심수·무료유료 히스토리 날짜(새벽 4시 전 실행이면 전날) — 수집 스탬프와 같은 값
@@ -530,6 +548,7 @@ if (require.main === module) (async ()=>{
   const web_wd = await webWeekday();
   const web_gn = await webGenre();
   const [app_wd, app_gn, s_comic, s_novel] = await Promise.all([appWeekday(), appGenre(), seriesAll("comic"), seriesAll("novel")]);
+  await fillMissingTitles([...Object.values(app_wd), ...Object.values(app_gn)]);   // 앱 랭킹에만 있는 작품 이름·썸네일
 
   let existingDetails = {};
   try { existingDetails = JSON.parse(fs.readFileSync(path.join(OUT,"details.json"),"utf8")); } catch(e){}
