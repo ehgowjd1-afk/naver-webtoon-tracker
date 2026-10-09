@@ -70,7 +70,8 @@ function computeRanking(revhist) {
     const info = lookup.id[id]; if (!info || !info[0]) continue;
     const name = info[0]; if (seen.has(name)) continue;
     const cands = (idx[normName(name)] || []).map(c => ({ ...c, d: sd[c.pn] })).filter(x => x.kind === "comic" && x.d && x.d.dl && x.d.ep);
-    const best = cands[0]; if (!best) continue;
+    const lk = (extra.link || {})[normName(name)]; if (lk === 0) continue;   // 수집기가 회차수로 고른 시리즈 판본(0=맞는 판본 없음) — 사이트와 같은 연결
+    const best = lk ? cands.find(c => c.pn === lk) : cands[0]; if (!best) continue;
     const dl = C.parseDlNum(best.d.dl), wep = (details[id] && details[id].ep) || best.d.ep;
     if (!dl || !wep) continue;
     const total = dl * UNIT(best.kind) * 0.9 * 0.6;

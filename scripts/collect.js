@@ -236,25 +236,59 @@ async function collectSeriesDetails(seriesData, existing){
 // 랭킹에 없는 신작도 연결 → collectSeriesDetails가 매일 다운수 갱신. map 키=normName(프론트 연동키와 동일).
 const _normName  = s => String(s||"").replace(/\s*\[[^\]]*\]\s*$/, "").replace(/\s+/g, "");
 const _normMatch = s => { s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^\])>]*[\])>]\s*$/, ""); }while(s!==p); return s.replace(/\s+/g,"").toLowerCase(); };
-async function searchLinkWebtoons(seriesData, sd, extra, cap=400){
+/* 시리즈 판본 고르기: 같은 이름 코믹이 여러 개(단행본·세트·[웹툰]·[컬러웹툰]·동명 다른 작품)면 회차수가 웹툰 총화와 가장 가까운 것.
+   예전엔 이름 같은 첫 결과 → 기생수가 64화 판본, 하울링이 동명 다른 작품(56화)에 연결돼 총회차수·회차당 거래액이 틀렸음.
+   회차수가 웹툰 총화의 0.8~1.25배(또는 ±3화) 밖이면 다른 판본으로 보고 연결 안 함(시리즈 없음이 틀린 연결보다 나음). */
+const epFits = (sEp, wEp) => !(wEp > 0 && sEp > 0) || Math.abs(sEp - wEp) <= 3 || (sEp >= wEp * 0.8 && sEp <= wEp * 1.25);   // 맞게 연결된 1,090작은 전부 0.95~1.05배(2026-10-09 실측)
+const _searchTotal = t => { const m = String(t||"").match(/\(총\s*(\d+)\s*(화|권)/); return { n: m ? +m[1] : 0, vol: m ? m[2] === "권" : /단행본|세트/.test(String(t||"")) }; };
+function pickSeriesHit(res, name, wEp){
+  const nm = _normMatch(name);
+  let hits = res.filter(r => r.kind === "comic" && _normMatch(r.title) === nm).map(r => Object.assign({}, r, { tot: _searchTotal(r.title) }));
+  if(hits.some(h => !h.tot.vol)) hits = hits.filter(h => !h.tot.vol);   // 화 단위 판본이 있으면 권(단행본·세트) 제외
+  if(!hits.length) return null;
+  if(!(wEp > 0)) return hits[0];
+  if(hits[0].tot.vol) return null;   // 웹툰은 화 단위로 팔림 — 권 단위(단행본·세트)만 있으면 권수가 우연히 화수와 비슷해도 연결 안 함
+  const dist = h => h.tot.n > 0 ? Math.abs(h.tot.n - wEp) : Infinity;
+  hits.sort((a, b) => dist(a) - dist(b));
+  return epFits(hits[0].tot.n, wEp) ? hits[0] : null;
+}
+/* 이미 아는 후보(랭킹 + 검색연동) 중 웹툰에 맞는 시리즈 pn. null=후보 없음(다운수 있는 코믹 없음), 0=후보는 있는데 맞는 판본 없음 */
+function bestSeriesLink(cands, sd, wEp){
+  const ok = cands.filter(c => c.kind === "comic" && sd[c.pn] && sd[c.pn].dl && sd[c.pn].ep);
+  if(!ok.length) return null;
+  if(!(wEp > 0)) return ok[0].pn;
+  const dist = c => Math.abs(Number(sd[c.pn].ep) - wEp);
+  const best = ok.slice().sort((a, b) => dist(a) - dist(b))[0];
+  return epFits(Number(sd[best.pn].ep), wEp) ? best.pn : 0;
+}
+const seriesIndex = seriesData => { const idx = {}; for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const c in (seriesData[kind]||{})[pf]||{}) for(const p in seriesData[kind][pf][c]) for(const it of seriesData[kind][pf][c][p]){ const n=_normName(it.t); (idx[n]||(idx[n]=[])).push({pn:it.id,kind}); } return idx; };
+/* 웹툰 이름(normName) → 고른 시리즈 pn(0=맞는 판본 없음)을 extra.link에 저장 → 프론트 revenueFor가 이걸 씀. 랭킹·연동·다운수가 바뀔 때마다(클라우드·로컬·성인 수집 끝) 다시 계산 */
+function refreshSeriesLinks(extra, sd, seriesData, lookupId, details){
+  const idx = seriesIndex(seriesData), link = {};
+  for(const id in lookupId){ const name = Array.isArray(lookupId[id]) ? lookupId[id][0] : (lookupId[id] && lookupId[id].name); if(!name) continue;
+    const key = _normName(name); if(key in link) continue;
+    const pn = bestSeriesLink([...(idx[key]||[]), ...((extra.map||{})[key]||[])], sd, ((details||{})[id]||{}).ep || 0);
+    if(pn !== null) link[key] = pn; }
+  extra.link = link;
+  return { linked: Object.values(link).filter(Boolean).length, none: Object.values(link).filter(v => v === 0).length };
+}
+async function searchLinkWebtoons(seriesData, sd, extra, cap=400, details={}){
   extra.map = extra.map || {}; extra.owned = extra.owned || [];
   const ownedSet = new Set(extra.owned);
-  const idx = {};
-  for(const kind of ["comic","novel"]) for(const pf of ["web","mobile"]) for(const c in (seriesData[kind]||{})[pf]||{}) for(const p in seriesData[kind][pf][c]) for(const it of seriesData[kind][pf][c][p]){ const n=_normName(it.t); (idx[n]||(idx[n]=[])).push({pn:it.id,kind}); }
-  const hasComic = n => (idx[n]||[]).some(x=>x.kind==="comic"&&sd[x.pn]&&sd[x.pn].dl&&sd[x.pn].ep) || (extra.map[n]||[]).some(x=>x.kind==="comic"&&sd[x.pn]&&sd[x.pn].dl&&sd[x.pn].ep);
+  const idx = seriesIndex(seriesData);
+  const hasComic = (n, wEp) => !!bestSeriesLink([...(idx[n]||[]), ...(extra.map[n]||[])], sd, wEp);   // 회차수가 맞는 코믹 시리즈가 이미 연결됨(틀린 판본만 있으면 다시 검색)
   const src = Object.keys(idL).length ? idL : (()=>{ try{ return JSON.parse(fs.readFileSync(path.join(OUT,"lookup.json"),"utf8")).id||{}; }catch(e){ return {}; } })();
   const wt = Object.entries(src).map(([id,v])=>({id:+id, name:Array.isArray(v)?v[0]:(v&&v.name)})).filter(x=>x.name);
   let searched=0, found=0;
   for(const w of wt){
     if(searched>=cap) break;
-    const key=_normName(w.name);
-    if(hasComic(key)) continue;   // 코믹 연결 완료 → 스킵. 미연결이면 코믹 나올 때까지 매일 재검색
+    const key=_normName(w.name), wEp=(details[w.id]||{}).ep||0;
+    if(hasComic(key, wEp)) continue;   // 맞는 코믹 연결 완료 → 스킵. 미연결·틀린 판본만 있으면 맞는 코믹 나올 때까지 매일 재검색
     searched++;
     try{
       const h=await getText(`https://series.naver.com/search/search.series?t=all&q=${encodeURIComponent(w.name)}`, UA_PC, "https://series.naver.com/");
       const res=parseSeriesSearch(h);
-      const nm=_normMatch(w.name);
-      const hit=res.find(r=>r.kind==="comic"&&_normMatch(r.title)===nm);   // 웹툰은 코믹만 연결(웹소설 오연결 방지)
+      const hit=pickSeriesHit(res, w.name, wEp);   // 웹툰은 코믹만 연결(웹소설 오연결 방지) · 같은 이름 여럿이면 회차수 가장 가까운 판본
       if(hit){
         try{ const dh=await getText(`https://series.naver.com/${hit.kind}/detail.series?productNo=${hit.pn}`, UA_PC, "https://series.naver.com/"); const pd=parseSeriesDetail(dh); pd.kind=hit.kind; if(pd.dl||pd.g||pd.ep||pd.syn){ sd[hit.pn]=mergeDetail(sd[hit.pn], pd, hit.kind); if(pd.dl) found++; } }catch(e){}
         const a=extra.map[key]||(extra.map[key]=[]);
@@ -539,7 +573,7 @@ function parseSeriesSearch(html){
   let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
   return out;
 }
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, episodeSplit, fillMissingTitles, adultEp, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, episodeSplit, fillMissingTitles, pickSeriesHit, bestSeriesLink, refreshSeriesLinks, epFits, adultEp, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();   // 랭킹·요일·장르 기록 날짜(기존 그대로)
   const hdate=runDate();   // 다운수·관심수·무료유료 히스토리 날짜(새벽 4시 전 실행이면 전날) — 수집 스탬프와 같은 값
@@ -568,7 +602,7 @@ if (require.main === module) (async ()=>{
   try {
     let sd={}; try{ sd=JSON.parse(fs.readFileSync(path.join(OUT,"series_details.json"),"utf8")); }catch(e){}
     let extra={updated:"",map:{},owned:[]}; try{ extra=JSON.parse(fs.readFileSync(path.join(OUT,"series_extra.json"),"utf8")); }catch(e){}
-    await searchLinkWebtoons({comic:s_comic, novel:s_novel}, sd, extra);
+    await searchLinkWebtoons({comic:s_comic, novel:s_novel}, sd, extra, 400, details);
     fs.writeFileSync(path.join(OUT,"series_details.json"), JSON.stringify(sd));
     fs.writeFileSync(path.join(OUT,"series_extra.json"), JSON.stringify(extra));
   } catch(e){ console.error("search-link failed:", e.message); }
@@ -578,6 +612,7 @@ if (require.main === module) (async ()=>{
     // 단가(대여/소장 쿠키) — 없는 코믹부터 매일 일부 채움(비성인; 성인은 CDP). 가격은 거의 안 변해 1회로 충분.
     try{ let extra={}; try{ extra=JSON.parse(fs.readFileSync(path.join(OUT,"series_extra.json"),"utf8")); }catch(e){} const got=await fillVolumePrices(sd, extra, 500); if(got) console.log("단가(쿠키) 신규 수집:", got); }catch(e){ console.error("price fill failed:", e.message); }
     fs.writeFileSync(path.join(OUT,"series_details.json"), JSON.stringify(sd));
+    try{ const extra=JSON.parse(fs.readFileSync(path.join(OUT,"series_extra.json"),"utf8")); const lr=refreshSeriesLinks(extra, sd, {comic:s_comic, novel:s_novel}, idL, details); fs.writeFileSync(path.join(OUT,"series_extra.json"), JSON.stringify(extra)); console.log("시리즈 판본 연결:", JSON.stringify(lr)); }catch(e){ console.error("series links failed:", e.message); }   // 웹툰↔시리즈 판본(회차수 기준) 다시 고름
   } catch(e){ console.error("series details failed:", e.message); }
   try { const full = fullRunOK(collectSeriesDetails.stats);   // 본수집 정상 여부 = 이번 실행이 비성인 다운수를 절반 이상 실제로 긁었는지
     const rh = updateRevenueHistory(OUT, hdate, {full}); if(rh) console.log("revenue history:", JSON.stringify(rh), "full:", full, JSON.stringify(collectSeriesDetails.stats||null)); } catch(e){ console.error("revenue history failed:", e.message); }   // 오늘 긁은 작품만 기록 + 정상이면 완료 날짜(lastFull) 표시

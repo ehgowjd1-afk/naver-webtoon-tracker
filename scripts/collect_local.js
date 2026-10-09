@@ -34,7 +34,6 @@ async function getText(url) { const r = await fetch(url, { headers: headers() })
 
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(path.join(D, f), "utf8")); } catch (e) { return d; } };
 const normName  = s => String(s || "").replace(/\s*\[[^\]]*\]\s*$/, "").replace(/\s+/g, "");                     // 프론트와 동일(연동 키)
-function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^\])>]*[\])>]\s*$/, ""); }while(s!==p); return s.replace(/\s+/g,"").toLowerCase(); } // 검색결과 매칭용: 뒤쪽 [독점]·(총 N화) 등 괄호 여러개 모두 제거
 
 (async () => {
   const t0 = Date.now();
@@ -54,7 +53,9 @@ function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^
   const idx = {};
   for (const kind of ["comic", "novel"]) for (const pf of ["web", "mobile"]) for (const c in (series[kind] || {})[pf] || {}) for (const p in series[kind][pf][c]) for (const it of series[kind][pf][c][p]) { const n = normName(it.t); (idx[n] || (idx[n] = [])).push({ pn: it.id, kind }); }
   // 웹툰은 '코믹' 시리즈에 연결돼야 완료. 웹소설(novel)만 연결된 건 미완료로 보고 코믹 찾을 때까지 재검색(코믹이 있으면 그걸로 교체).
-  const hasComic = n => (idx[n] || []).some(x => x.kind === "comic" && sd[x.pn] && sd[x.pn].dl && sd[x.pn].ep) || (extra.map[n] || []).some(x => x.kind === "comic" && sd[x.pn] && sd[x.pn].dl && sd[x.pn].ep);
+  // 회차수가 웹툰 총화와 맞는(0.8~1.25배 또는 ±3화) 코믹이 있어야 완료 — 단행본·동명 다른 작품만 연결돼 있으면 맞는 판본 찾을 때까지 재검색
+  const det = readJSON("details.json", {});
+  const hasComic = (n, wEp) => !!C.bestSeriesLink([...(idx[n] || []), ...(extra.map[n] || [])], sd, wEp);
 
   function flush() { extra.owned = [...ownedSet]; extra.updated = new Date().toISOString(); fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd)); fs.writeFileSync(path.join(D, "series_extra.json"), JSON.stringify(extra)); }
   async function scrapeDetail(pn, kind) { try { const h = await getText(`https://series.naver.com/${kind}/detail.series?productNo=${pn}`); const pd = C.parseSeriesDetail(h); pd.kind = kind; if (pd.dl || pd.g || pd.ep || pd.syn) { sd[pn] = C.mergeDetail(sd[pn], pd, kind); return pd; } } catch (e) {} return null; }
@@ -64,14 +65,13 @@ function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^
   let searched = 0, found = 0;
   for (const w of wt) {
     if (searched >= MAXNEW) break;
-    const key = normName(w.name);
-    if (hasComic(key)) continue;   // 코믹(웹툰) 시리즈 연결 완료 → 스킵. 미연결/웹소설만연결 → 매일 재검색(코믹 나올 때까지)
+    const key = normName(w.name), wEp = (det[w.id] || {}).ep || 0;
+    if (hasComic(key, wEp)) continue;   // 맞는 코믹(웹툰) 시리즈 연결 완료 → 스킵. 미연결/웹소설만/틀린 판본만 → 매일 재검색(맞는 코믹 나올 때까지)
     searched++;
     try {
       const h = await getText(`https://series.naver.com/search/search.series?t=all&q=${encodeURIComponent(w.name)}`);
       const res = C.parseSeriesSearch(h);
-      const nm = normMatch(w.name);
-      const hit = res.find(r => r.kind === "comic" && normMatch(r.title) === nm);   // 웹툰은 '코믹'만 연결(웹소설은 동명이작 오연결 위험 + 다른 상품이라 제외). 코믹 없으면 시리즈없음(다운수 0)
+      const hit = C.pickSeriesHit(res, w.name, wEp);   // 웹툰은 '코믹'만 연결(웹소설은 동명이작 오연결 위험 + 다른 상품이라 제외) · 같은 이름 여럿이면 회차수 가장 가까운 판본, 없으면 시리즈없음
       if (hit) {
         const pd = await scrapeDetail(hit.pn, hit.kind);
         const a = extra.map[key] || (extra.map[key] = []);
@@ -97,6 +97,7 @@ function normMatch(s){ s=String(s||""); let p; do{ p=s; s=s.replace(/\s*[\[(<][^
     await sleep(120);
   }
   console.log(`owned 다운수 갱신: ${refreshed}/${owned.length}${COOKIE ? ` (신규 확보 ${newDl})` : ""}`);
+  console.log("시리즈 판본 연결:", JSON.stringify(C.refreshSeriesLinks(extra, sd, series, lookup.id || {}, det)));   // 웹툰↔시리즈 판본(회차수 기준) 다시 고름 → 프론트가 사용
 
   flush();
   const rh = C.updateRevenueHistory(D, DATE);   // 이번에 새로 긁은 작품(검색연동·owned)만 기록 — 안 긁은 랭킹작에 어제 값을 베껴 쓰지 않음

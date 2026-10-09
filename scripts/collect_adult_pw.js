@@ -104,6 +104,7 @@ async function collectAll(page, opts = {}) {
     await sleep(dmin + Math.floor(Math.random() * Math.max(0, dmax - dmin)));
   }
   extra.adult = [...adultSet];
+  try { console.log("시리즈 판본 연결:", JSON.stringify(C.refreshSeriesLinks(extra, sd, series, readJSON("lookup.json", { id: {} }).id || {}, readJSON("details.json", {})))); } catch (e) {}   // 새로 다운수 생긴 성인 판본(예: 기생수 [웹툰])으로 연결 다시 고름
   if (got > 0) extra.cdpDate = RUN_DATE;   // 오늘 성인 수집 완료 표시(하루 여러번 시도해도 1번만 수집) — 기록한 날짜 칸과 같은 날짜(자정 넘겨 끝나도 다음날 수집을 막지 않게)
   fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd));
   fs.writeFileSync(path.join(D, "series_extra.json"), JSON.stringify(extra));
