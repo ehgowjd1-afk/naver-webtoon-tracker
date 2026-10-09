@@ -318,16 +318,16 @@ function exportRevXLSX(name, dow){
   const rs=revSeriesFor(name, 0);
   if(!rs||!rs.has.length){ alert("아직 이 작품의 거래액 데이터가 없어요.\n매일 새벽 자동으로 쌓입니다."); return; }
   const sheets=[];
-  // 무료/유료(웹툰 미리보기 기준, ep_history 오늘부터 누적) 날짜별 조인
-  const wid = LOOKUP.name ? LOOKUP.name[name] : null;
+  // 무료/유료(웹툰 회차목록 기준, ep_history 9/16부터 누적) 날짜별 조인. 시리즈 탭에서 열면 name이 시리즈 제목('더 복서 [독점]')이라 정규화 이름으로도 찾음
+  let wid = LOOKUP.name ? LOOKUP.name[name] : null;
+  if(wid==null && LOOKUP.name){ const n=normName(name); for(const k in LOOKUP.name){ if(normName(k)===n){ wid=LOOKUP.name[k]; break; } } }
   const ephMap = {};
   if(EPHIST && EPHIST.works && wid!=null && EPHIST.works[wid]){ const ew=EPHIST.works[wid], ed=EPHIST.dates||[]; ed.forEach((dt,i)=>{ ephMap[dt]={f:ew.f[i], p:ew.p[i]}; }); }
-  // Sheet1: 날짜별 누적. 유료=웹툰 미리보기 회차, 무료=총회차수−유료 (합=총회차수로 정합)
-  const rows=[["날짜","다운수","총회차수","무료회차","유료회차","총거래액(원)","회차당(원)"]];
-  for(const p of rs.pts){ if(p.total==null) continue; const e=ephMap[p.dt]||{};
-    const paid = e.p!=null ? Math.min(e.p, p.ep) : null;
-    const free = paid!=null ? Math.max(0, p.ep - paid) : null;
-    rows.push([p.dt, p.dl, p.ep, free!=null?free:"", paid!=null?paid:"", Math.round(p.deal), Math.round(p.per)]); }
+  // Sheet1: 날짜별 누적. 총회차수=시리즈 회차수(회차당 계산 기준) · 웹툰 총화/무료/유료=그날 웹툰 회차목록(무료+유료=웹툰 총화).
+  // 예전엔 무료=시리즈 회차수−유료로 계산 → 시리즈 회차수가 웹툰과 다른 날(수집 시각 차이·다른 판본 매칭)엔 무료가 틀리거나 0이 됐음
+  const rows=[["날짜","다운수","총회차수(시리즈)","웹툰 총화","무료회차","유료회차","총거래액(원)","회차당(원)"]];
+  for(const p of rs.pts){ if(p.total==null) continue; const e=ephMap[p.dt]||{}; const has=e.p!=null&&e.f!=null;
+    rows.push([p.dt, p.dl, p.ep, has?e.f+e.p:"", has?e.f:"", has?e.p:"", Math.round(p.deal), Math.round(p.per)]); }
   sheets.push({name:"일별 누적", rows});
   // Sheet2: 주간 발생 매출(연재요일 주간) + 전주 대비 변동 금액·비율
   const weeks=weeklyRevenueWeeks(name, dow||0);
