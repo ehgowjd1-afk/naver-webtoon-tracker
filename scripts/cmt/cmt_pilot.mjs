@@ -31,6 +31,7 @@ const SONNET = { model: "claude-sonnet-5-5", effort: "medium" };
 const EST_PER_COMMENT = 0.0001;   // 2단계: 댓글 1개당 예상(일괄, 여유 있게)
 const EST_THEME_WORK = 0.15;      // 1단계: 작품 1개당 예상
 const EST_NEEDS_WORK = 0.15;      // 3단계: 작품 1개당 예상
+const EST_RECHECK_PER = 0.0006;   // 불호 재확인: 댓글 1개당 예상(Sonnet)
 const MOCK = !!process.env.CMT_MOCK;
 
 const args = { ids: [], limitUsd: 30, capUsd: 3, waitMin: 100, collectOnly: false, summary: null };
@@ -132,6 +133,7 @@ function mockAnswer(customId, body) {
   if (customId.startsWith("h-")) return { comments: ns.map((n, i) => ({ n, th: [["T1"], ["T2"], ["T3"], ["T4"], [], ["T1", "T9"]][i % 6],
     tn: ["praise", "miss", "char", "critic", "other", "tease"][i % 6], nd: i % 3 ? [] : ["hero_revenge"], st: i % 3 ? "none" : "met", nn: i % 7 ? "" : "신규 니즈",
     ac: ["none", "stay", "churn", "pay"][i % 4], cf: ["hi", "mid", "lo"][i % 3] })) };
+  if (customId.startsWith("r-")) return { items: ns.map((n, i) => ({ n, v: ["goguma", "stuffy", "forced", "immersion", "light", "ops", "other"][i % 7] })) };
   return { needs: [{ axis: "hero", need: "응징·사이다", state: "met", evidence: "가짜", size: "중", why: "가짜", refs: ns.slice(0, 3).concat([999999]) }] };
 }
 
@@ -212,7 +214,7 @@ function applyLabels(works, out) {
       const b = { th: [...new Set((it.th || []).map((x) => String(x).trim().toUpperCase()).filter((x) => themeOf.has(x)))].slice(0, 2),
         tn: it.tn, nd: [...new Set(it.nd || [])].slice(0, 3), st: it.st, nn: N.cut(it.nn, 20), ac: it.ac, cf: it.cf };
       if (["char", "tease", "miss", "nudge"].includes(b.tn) && b.ac === "churn") b.ac = "none";
-      if (b.tn === "miss") b.nd = [];
+      if (b.tn === "miss") { b.nd = []; b.th = []; }   // 연재 운영·작품 밖은 분석에서 뺌(사용자 결정 2026-10-11)
       if (!b.nd.length && !b.nn) b.st = "none";
       const before = b.th.length;   // '불호' 묶음엔 확신 있는 진짜 작품 불만만
       b.th = b.th.filter((id) => themeOf.get(id).bucket !== "dislike" || (b.tn === "critic" && b.cf !== "lo"));
@@ -221,6 +223,39 @@ function applyLabels(works, out) {
     }
   }
   return { usd, failed };
+}
+// ---- 불호 재확인(Sonnet): Haiku가 critic으로 본 댓글만 → 고구마/캐릭터 답답/전개 억지 또는 '불호 아님'
+const RECHECK_CHUNK = 60;
+function recheckRequests(works) {
+  const reqs = [];
+  works.forEach((w, wi) => {
+    const cand = w.sample.filter((c) => c.lab && c.lab.tn === "critic");
+    for (let k = 0; k < cand.length; k += RECHECK_CHUNK) reqs.push({ custom_id: `r-${wi}-${k / RECHECK_CHUNK}`, params: AI.buildRecheckParams(SONNET, w, cand.slice(k, k + RECHECK_CHUNK), CFG.textMax) });
+  });
+  return reqs;
+}
+function applyRecheck(works, out) {
+  let usd = 0;
+  const seen = new Set();
+  for (const [cid, res] of out) {
+    const w = works[Number(cid.split("-")[1])];
+    if (!w || res.type !== "succeeded") { report.notes.push(`불호 재확인 실패: ${cid}`); continue; }
+    usd += costOf(SONNET.model, res.message.usage || {});
+    let parsed; try { parsed = AI.parseJson(res.message); } catch (e) { report.notes.push(`불호 재확인 해석 실패: ${cid}`); continue; }
+    const byN = new Map(w.sample.map((c) => [c.n, c]));
+    for (const it of parsed.items || []) { const c = byN.get(it.n); if (c && c.lab) { seen.add(w.id + "_" + it.n); setRecheck(w, c, it.v); } }
+  }
+  // 답이 안 온 후보는 불호가 아닌 쪽으로(보수적으로)
+  for (const w of works) for (const c of w.sample) if (c.lab && c.lab.tn === "critic" && !c.lab.dk && !seen.has(w.id + "_" + c.n)) setRecheck(w, c, "other");
+  return usd;
+}
+function setRecheck(w, c, v) {
+  const dis = new Set((w.themes || []).filter((t) => t.bucket === "dislike").map((t) => t.id));
+  if (AI.DISLIKE_KINDS[v]) { c.lab.dk = v; return; }
+  c.lab.tn = { immersion: "char", light: "nudge", ops: "miss", other: "other" }[v] || "other";
+  c.lab.th = c.lab.tn === "miss" ? [] : c.lab.th.filter((id) => !dis.has(id));
+  if (c.lab.ac === "churn") c.lab.ac = "none";
+  report.demoted++;
 }
 function themeStats(w) {
   for (const t of w.themes || []) {
@@ -237,7 +272,14 @@ function themeStats(w) {
   for (const e of w.episodes) {
     e.topThemes = (w.themes || []).map((t) => ({ id: t.id, n: t.eps[e.label] || 0 })).filter((x) => x.n >= 2).sort((a, b) => b.n - a.n).slice(0, 3);
   }
-  w.untagged = w.sample.filter((c) => c.lab && !c.lab.th.length).length;
+  w.untagged = w.sample.filter((c) => c.lab && !c.lab.th.length && c.lab.tn !== "miss").length;
+  w.ops = w.sample.filter((c) => c.lab && c.lab.tn === "miss").length;
+  w.dislikeKinds = {};
+  for (const k of Object.keys(AI.DISLIKE_KINDS)) {
+    const cs = w.sample.filter((c) => c.lab && c.lab.tn === "critic" && c.lab.dk === k);
+    const eps = {}; for (const c of cs) eps[c.label] = (eps[c.label] || 0) + 1;
+    w.dislikeKinds[k] = { label: AI.DISLIKE_KINDS[k], count: cs.length, likes: cs.reduce((t, c) => t + c.like, 0), eps, refs: [...cs].sort((a, b) => b.like - a.like).slice(0, 6).map((c) => c.n) };
+  }
 }
 
 // ---------------- ⑥ 3단계: 참고용 니즈 맵 ----------------
@@ -293,7 +335,7 @@ function applyNeeds(works, out) {
 const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {};
 state.spend ||= {};
 const report = { version: 1, platform: "naver", generated_at: new Date().toISOString(), cfg: CFG, models: { haiku: HAIKU, sonnet: SONNET },
-  cost: { theme: 0, theme2: 0, haiku: 0, needs: 0 }, batches: {}, notes: [], dropped: 0, scrubbed: 0, mock: MOCK };
+  cost: { theme: 0, theme2: 0, haiku: 0, recheck: 0, needs: 0 }, batches: {}, notes: [], dropped: 0, demoted: 0, scrubbed: 0, mock: MOCK };
 let works = [];
 const GRAM = 12;   // 공개 결과에 원문이 실리지 않게: AI 글이 어떤 댓글과 공백 빼고 12자 넘게 겹치면 가림
 function scrubber(w) {
@@ -311,6 +353,7 @@ function save() {
       episodes: w.episodes.map(({ _best, _early, ...e }) => e),
       themes: (w.themes || []).map((t) => ({ ...t, label: sc(t.label), def: sc(t.def) })), untagged: w.untagged ?? null,
       comments: (w.sample || []).map(({ text, ...c }) => c),   // 원문 없음 — 번호·시각·좋아요·표시만
+      dislikeKinds: w.dislikeKinds || null, ops: w.ops ?? null,   // 불호 세 가지(근거는 댓글 번호) · 분석에서 뺀 연재 운영 얘기 수
       needStats: w.needStats || {}, newNeeds: Object.fromEntries(Object.entries(w.newNeeds || {}).map(([k, v]) => [sc(k), v])),
       needsMap: w.needsMap ? w.needsMap.map((x) => ({ ...x, need: sc(x.need), evidence: sc(x.evidence), why: sc(x.why) })) : null };
   };
@@ -355,6 +398,8 @@ try {
     if (a.failed) report.notes.push(`2단계 실패한 묶음 ${a.failed}개`);
     return a.usd;
   });
+  const rc = recheckRequests(works);
+  if (rc.length) await stage("불호 재확인(Sonnet)", rc, works.reduce((t, w) => t + w.sample.filter((c) => c.lab && c.lab.tn === "critic").length, 0) * EST_RECHECK_PER, "recheck", (out) => applyRecheck(works, out));
   for (const w of works) { judge(w); themeStats(w); }
   save();
 
@@ -365,11 +410,12 @@ try {
   process.exitCode = 1;
 } finally {
   save();
-  const usd = report.cost.theme + report.cost.theme2 + report.cost.haiku + report.cost.needs;
+  const usd = report.cost.theme + report.cost.theme2 + report.cost.haiku + report.cost.recheck + report.cost.needs;
   const lines = [`## 네이버 회차 댓글 분석 시범${MOCK ? " (가짜 답)" : ""}`, `- 작품: ${works.map((w) => w.title).join(", ")}`, `- 네이버 요청 ${N.requests}번`,
     `- 표시한 댓글 ${works.reduce((t, w) => t + (w.sample || []).filter((c) => c.lab).length, 0)}개, 반복 반응 묶음 ${works.map((w) => (w.themes || []).length).join("·")}개`,
-    `- '불호' 묶음에서 뺀 겉말 불평 ${report.dropped}개, 원문과 겹쳐 가린 글 ${report.scrubbed || 0}개`,
-    `- AI 비용 $${usd.toFixed(3)} (묶음 찾기 $${(report.cost.theme + report.cost.theme2).toFixed(3)} + 표시 $${report.cost.haiku.toFixed(3)} + 니즈 맵 $${report.cost.needs.toFixed(3)}) / 이 달 합계 $${(state.spend[MONTH] || 0).toFixed(2)}`,
+    `- '불호' 묶음에서 뺀 겉말 불평 ${report.dropped}개, 재확인에서 불호 아님으로 돌린 것 ${report.demoted}개, 원문과 겹쳐 가린 글 ${report.scrubbed || 0}개`,
+    `- 불호 세 가지: ${works.map((w) => w.title + ' ' + Object.values(w.dislikeKinds || {}).map((k) => k.label.split('(')[0] + ' ' + k.count).join('·')).join(' / ')} · 연재 운영 얘기(분석 제외) ${works.map((w) => w.ops || 0).join('·')}개`,
+    `- AI 비용 $${usd.toFixed(3)} (묶음 찾기 $${(report.cost.theme + report.cost.theme2).toFixed(3)} + 표시 $${report.cost.haiku.toFixed(3)} + 불호 재확인 $${report.cost.recheck.toFixed(3)} + 니즈 맵 $${report.cost.needs.toFixed(3)}) / 이 달 합계 $${(state.spend[MONTH] || 0).toFixed(2)}`,
     ...report.notes.map((n) => "- " + n), ...(report.error ? ["- 오류: " + report.error] : [])];
   log(lines.join("\n"));
   if (args.summary) appendFileSync(args.summary, lines.join("\n") + "\n");
