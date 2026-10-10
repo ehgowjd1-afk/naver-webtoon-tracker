@@ -148,13 +148,22 @@ function themeText(w, perBest, perEarly) {
   }
   return lines.join("\n");
 }
+function themeTextFor(w) {
+  let b = CFG.themeBestPerEp, e = CFG.themeEarlyPerEp, t = themeText(w, b, e);
+  while (t.length > CFG.synthMaxChars && (b > 2 || e > 8)) { if (b > 2) b--; if (e > 8) e = Math.floor(e * 0.8); t = themeText(w, b, e); }
+  log(`  1단계 자료: ${w.title} ${t.length.toLocaleString()}자 (회차마다 베스트 ${b}개, 튄 회차 +${e}개)`);
+  return t;
+}
 function themeRequests(works) {
-  return works.map((w, wi) => {
-    let b = CFG.themeBestPerEp, e = CFG.themeEarlyPerEp, t = themeText(w, b, e);
-    while (t.length > CFG.synthMaxChars && (b > 2 || e > 8)) { if (b > 2) b--; if (e > 8) e = Math.floor(e * 0.8); t = themeText(w, b, e); }
-    log(`  1단계 자료: ${w.title} ${t.length.toLocaleString()}자 (회차마다 베스트 ${b}개, 튄 회차 +${e}개)`);
-    return { custom_id: `t-${wi}`, params: AI.buildThemeParams(SONNET, t) };
-  });
+  return works.map((w, wi) => ({ custom_id: `t-${wi}`, params: AI.buildThemeParams(SONNET, themeTextFor(w)) }));
+}
+// 묶음이 너무 적게 온 작품은 한 번 더 (2026-10-10 시범: 화산귀환이 오류 없이 1개만 옴)
+const THEME_MIN = 8;
+function themeRetryRequests(works) {
+  return works.map((w, wi) => ({ w, wi })).filter(({ w }) => (w.themes || []).length < THEME_MIN).map(({ w, wi }) => ({
+    custom_id: `t-${wi}`,
+    params: AI.buildThemeParams(SONNET, themeTextFor(w) + `\n\n(주의: 앞선 답의 묶음이 ${(w.themes || []).length}개뿐이었습니다. 이 작품 댓글에서 되풀이되는 반응을 빠짐없이 찾아 반드시 15~22개 묶음으로 정리하세요. 인물별 매력·과몰입, 명장면 환호, 개그·드립, 연재 아쉬움, 추리, 원작 비교를 각각 따로 묶습니다.)`)
+  }));
 }
 function applyThemes(works, out) {
   let usd = 0;
@@ -284,7 +293,7 @@ function applyNeeds(works, out) {
 const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {};
 state.spend ||= {};
 const report = { version: 1, platform: "naver", generated_at: new Date().toISOString(), cfg: CFG, models: { haiku: HAIKU, sonnet: SONNET },
-  cost: { theme: 0, haiku: 0, needs: 0 }, batches: {}, notes: [], dropped: 0, scrubbed: 0, mock: MOCK };
+  cost: { theme: 0, theme2: 0, haiku: 0, needs: 0 }, batches: {}, notes: [], dropped: 0, scrubbed: 0, mock: MOCK };
 let works = [];
 const GRAM = 12;   // 공개 결과에 원문이 실리지 않게: AI 글이 어떤 댓글과 공백 빼고 12자 넘게 겹치면 가림
 function scrubber(w) {
@@ -333,6 +342,11 @@ try {
   if (!MOCK && spent + est > args.limitUsd) throw new Error("이 달 한도를 넘을 것 같아 보내지 않습니다");
 
   await stage("1단계(Sonnet) 반복 반응 찾기", themeRequests(works), works.length * EST_THEME_WORK, "theme", (out) => applyThemes(works, out));
+  const retry = themeRetryRequests(works);
+  if (retry.length) {
+    report.notes.push(`1단계 묶음이 ${THEME_MIN}개 미만이라 다시 요청: ${retry.map((r) => works[Number(r.custom_id.split("-")[1])].title).join(", ")}`);
+    await stage("1단계 다시(묶음이 적은 작품)", retry, retry.length * EST_THEME_WORK, "theme2", (out) => applyThemes(works, out));
+  }
   save();
   if (!works.some((w) => w.themes && w.themes.length)) throw new Error("반복 반응 묶음을 하나도 받지 못했습니다");
 
@@ -351,11 +365,11 @@ try {
   process.exitCode = 1;
 } finally {
   save();
-  const usd = report.cost.theme + report.cost.haiku + report.cost.needs;
+  const usd = report.cost.theme + report.cost.theme2 + report.cost.haiku + report.cost.needs;
   const lines = [`## 네이버 회차 댓글 분석 시범${MOCK ? " (가짜 답)" : ""}`, `- 작품: ${works.map((w) => w.title).join(", ")}`, `- 네이버 요청 ${N.requests}번`,
     `- 표시한 댓글 ${works.reduce((t, w) => t + (w.sample || []).filter((c) => c.lab).length, 0)}개, 반복 반응 묶음 ${works.map((w) => (w.themes || []).length).join("·")}개`,
     `- '불호' 묶음에서 뺀 겉말 불평 ${report.dropped}개, 원문과 겹쳐 가린 글 ${report.scrubbed || 0}개`,
-    `- AI 비용 $${usd.toFixed(3)} (묶음 찾기 $${report.cost.theme.toFixed(3)} + 표시 $${report.cost.haiku.toFixed(3)} + 니즈 맵 $${report.cost.needs.toFixed(3)}) / 이 달 합계 $${(state.spend[MONTH] || 0).toFixed(2)}`,
+    `- AI 비용 $${usd.toFixed(3)} (묶음 찾기 $${(report.cost.theme + report.cost.theme2).toFixed(3)} + 표시 $${report.cost.haiku.toFixed(3)} + 니즈 맵 $${report.cost.needs.toFixed(3)}) / 이 달 합계 $${(state.spend[MONTH] || 0).toFixed(2)}`,
     ...report.notes.map((n) => "- " + n), ...(report.error ? ["- 오류: " + report.error] : [])];
   log(lines.join("\n"));
   if (args.summary) appendFileSync(args.summary, lines.join("\n") + "\n");
