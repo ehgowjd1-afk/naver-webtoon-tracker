@@ -8,5 +8,8 @@ scripts/.pw-profile/
 scripts/.pw-realprofile/
 scripts/.pw-state.json
 package-lock.json
+scripts/.ai-key/
+# ↑ 댓글 AI 분석 결과(암호화) 여는 열쇠 — 절대 커밋 금지. 공개 열쇠(scripts/ai/public.pem)만 올림
 scripts/.notion.json
 scripts/.notion_tables.json
+ai_out/

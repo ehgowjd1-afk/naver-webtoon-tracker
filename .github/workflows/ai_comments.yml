@@ -1,0 +1,78 @@
+name: ai-comments
+# 댓글 AI 분류 (scripts/ai/comments_ai.js) — 수동 실행 전용. 매일 자동 수집(collect)과 완전히 따로 돌고, 실패해도 그쪽엔 영향 없음.
+# 결과(댓글 원문·분류)는 공개 열쇠로 잠가 실행 결과물(artifact)로만 남김 — 저장소에 커밋하지 않음. 여는 열쇠는 사용자 컴퓨터에만.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "pilot(바로 분류) / submit(일괄 처리 제출, 반값) / fetch(일괄 처리 결과 받기)"
+        required: true
+        default: "pilot"
+      ids:
+        description: "작품 titleId 쉼표로 (비우면 앱 주간 전체·여성·남성 전부)"
+        required: false
+        default: "769209,793275"
+      eps:
+        description: "최근 몇 화 (숫자) 또는 all"
+        required: false
+        default: "10"
+      top:
+        description: "회차당 좋아요 상위 몇 개"
+        required: false
+        default: "30"
+      rand:
+        description: "회차당 나머지 중 무작위 몇 개"
+        required: false
+        default: "70"
+      maxreq:
+        description: "최대 회차 수 (0 = 제한 없음)"
+        required: false
+        default: "0"
+      wait:
+        description: "submit 후 결과를 기다릴 분"
+        required: false
+        default: "300"
+      batches:
+        description: "fetch 모드: 일괄 처리 id (쉼표)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-comments
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Claude SDK 설치
+        run: npm install --no-save --no-package-lock @anthropic-ai/sdk@0.132.1
+      - name: 댓글 AI 분류
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: >
+          node scripts/ai/comments_ai.js
+          --mode=${{ inputs.mode }}
+          --ids=${{ inputs.ids }}
+          --eps=${{ inputs.eps }}
+          --top=${{ inputs.top }}
+          --rand=${{ inputs.rand }}
+          --max-requests=${{ inputs.maxreq }}
+          --wait-min=${{ inputs.wait }}
+          --batches=${{ inputs.batches }}
+      - name: 결과물(암호화) 올리기
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-comments-${{ github.run_id }}
+          path: ai_out/
+          retention-days: 30
+          if-no-files-found: ignore
