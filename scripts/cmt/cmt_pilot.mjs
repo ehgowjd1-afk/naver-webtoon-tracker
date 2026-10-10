@@ -226,10 +226,13 @@ function applyLabels(works, out) {
 }
 // ---- 불호 재확인(Sonnet): Haiku가 critic으로 본 댓글만 → 고구마/캐릭터 답답/전개 억지 또는 '불호 아님'
 const RECHECK_CHUNK = 60;
+const DISLIKE_WORDS = /답답|고구마|억지|개연|캐붕|질질|어장|민폐|무책임|비호감|매력\s?(이\s?)?없|실망|이해\s?(가\s?)?안|감정선|노잼|지루|지팔지꼰|하차|진도|내용\s?(이\s?)?없|별로/;
 function recheckRequests(works) {
   const reqs = [];
   works.forEach((w, wi) => {
-    const cand = w.sample.filter((c) => c.lab && c.lab.tn === "critic");
+    // Haiku가 불호로 본 것 + 불호 단어가 든 다른 댓글(연재 운영 제외) — 2차 채점에서 '수애야 어장~ㅋㅋ' 같은 캐릭터 답답 평가를 몰입으로 놓침
+    const cand = w.sample.filter((c) => c.lab && (c.lab.tn === "critic" || (c.lab.tn !== "miss" && DISLIKE_WORDS.test(c.text))));
+    for (const c of cand) c.lab.wasCritic = c.lab.tn === "critic";
     for (let k = 0; k < cand.length; k += RECHECK_CHUNK) reqs.push({ custom_id: `r-${wi}-${k / RECHECK_CHUNK}`, params: AI.buildRecheckParams(SONNET, w, cand.slice(k, k + RECHECK_CHUNK), CFG.textMax) });
   });
   return reqs;
@@ -247,11 +250,13 @@ function applyRecheck(works, out) {
   }
   // 답이 안 온 후보는 불호가 아닌 쪽으로(보수적으로)
   for (const w of works) for (const c of w.sample) if (c.lab && c.lab.tn === "critic" && !c.lab.dk && !seen.has(w.id + "_" + c.n)) setRecheck(w, c, "other");
+  for (const w of works) for (const c of w.sample) if (c.lab) delete c.lab.wasCritic;
   return usd;
 }
 function setRecheck(w, c, v) {
   const dis = new Set((w.themes || []).filter((t) => t.bucket === "dislike").map((t) => t.id));
-  if (AI.DISLIKE_KINDS[v]) { c.lab.dk = v; return; }
+  if (AI.DISLIKE_KINDS[v]) { c.lab.tn = "critic"; c.lab.dk = v; if (c.lab.wasCritic === false) report.promoted++; return; }
+  if (c.lab.wasCritic === false) { if (v === "ops") { c.lab.tn = "miss"; c.lab.th = []; } return; }   // 넓힌 후보가 불호 아니면 원래 표시 그대로
   c.lab.tn = { immersion: "char", light: "nudge", ops: "miss", other: "other" }[v] || "other";
   c.lab.th = c.lab.tn === "miss" ? [] : c.lab.th.filter((id) => !dis.has(id));
   if (c.lab.ac === "churn") c.lab.ac = "none";
@@ -335,7 +340,7 @@ function applyNeeds(works, out) {
 const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {};
 state.spend ||= {};
 const report = { version: 1, platform: "naver", generated_at: new Date().toISOString(), cfg: CFG, models: { haiku: HAIKU, sonnet: SONNET },
-  cost: { theme: 0, theme2: 0, haiku: 0, recheck: 0, needs: 0 }, batches: {}, notes: [], dropped: 0, demoted: 0, scrubbed: 0, mock: MOCK };
+  cost: { theme: 0, theme2: 0, haiku: 0, recheck: 0, needs: 0 }, batches: {}, notes: [], dropped: 0, demoted: 0, promoted: 0, scrubbed: 0, mock: MOCK };
 let works = [];
 const GRAM = 12;   // 공개 결과에 원문이 실리지 않게: AI 글이 어떤 댓글과 공백 빼고 12자 넘게 겹치면 가림
 function scrubber(w) {
@@ -413,7 +418,7 @@ try {
   const usd = report.cost.theme + report.cost.theme2 + report.cost.haiku + report.cost.recheck + report.cost.needs;
   const lines = [`## 네이버 회차 댓글 분석 시범${MOCK ? " (가짜 답)" : ""}`, `- 작품: ${works.map((w) => w.title).join(", ")}`, `- 네이버 요청 ${N.requests}번`,
     `- 표시한 댓글 ${works.reduce((t, w) => t + (w.sample || []).filter((c) => c.lab).length, 0)}개, 반복 반응 묶음 ${works.map((w) => (w.themes || []).length).join("·")}개`,
-    `- '불호' 묶음에서 뺀 겉말 불평 ${report.dropped}개, 재확인에서 불호 아님으로 돌린 것 ${report.demoted}개, 원문과 겹쳐 가린 글 ${report.scrubbed || 0}개`,
+    `- '불호' 묶음에서 뺀 겉말 불평 ${report.dropped}개, 재확인에서 불호 아님으로 돌린 것 ${report.demoted}개, 불호 단어로 넓혀 찾은 불호 ${report.promoted}개, 원문과 겹쳐 가린 글 ${report.scrubbed || 0}개`,
     `- 불호 세 가지: ${works.map((w) => w.title + ' ' + Object.values(w.dislikeKinds || {}).map((k) => k.label.split('(')[0] + ' ' + k.count).join('·')).join(' / ')} · 연재 운영 얘기(분석 제외) ${works.map((w) => w.ops || 0).join('·')}개`,
     `- AI 비용 $${usd.toFixed(3)} (묶음 찾기 $${(report.cost.theme + report.cost.theme2).toFixed(3)} + 표시 $${report.cost.haiku.toFixed(3)} + 불호 재확인 $${report.cost.recheck.toFixed(3)} + 니즈 맵 $${report.cost.needs.toFixed(3)}) / 이 달 합계 $${(state.spend[MONTH] || 0).toFixed(2)}`,
     ...report.notes.map((n) => "- " + n), ...(report.error ? ["- 오류: " + report.error] : [])];
