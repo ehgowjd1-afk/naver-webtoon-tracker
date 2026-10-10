@@ -1,0 +1,70 @@
+name: 회차 댓글 분석 시범
+
+# scripts/cmt/cmt_pilot.mjs 를 손으로만 돌립니다 (자동 실행 없음). 매일 자동 수집(collect)과 완전히 따로 돌고, 실패해도 영향 없음.
+# 작품 1~3개의 전 회차 베스트 댓글 + 댓글 수가 튄 회차의 공개 직후 댓글을 로그인 없이 모아(닉네임·아이디는 버림, 요청 간격 2초),
+# AI로 반복 반응 묶음 찾기(Sonnet) → 댓글마다 표시(Haiku) → 참고용 니즈 맵(Sonnet)을 만듭니다. (리디 트래커 2판과 같은 방식)
+# 결과: 원문 없는 숫자·표시(result.json) + 원문 포함 잠긴 파일(full.enc.json, 사용자 컴퓨터에서만 열림)을 하루만 보관하는 결과물로.
+# 저장소에는 이 달 AI 사용액(state/ai_state.json)만 커밋합니다. 일괄은 보내는 즉시 예상 비용을 먼저 기록하고 끝나면 실제 금액으로 맞춥니다.
+
+on:
+  workflow_dispatch:
+    inputs:
+      ids:
+        description: "작품 titleId (쉼표로 1~3개)"
+        type: string
+        default: "769209,793275"
+      cap_usd:
+        description: "이번 시범 비용 상한(달러) — 예상이 넘으면 보내지 않음"
+        type: string
+        default: "3"
+      mock:
+        description: "가짜 답 모드(돈 안 듦)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ai-comments
+  cancel-in-progress: false
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Claude SDK 설치
+        run: npm install --no-save --no-package-lock @anthropic-ai/sdk@0.132.1
+      # 입력값은 환경 변수로 넘김(명령줄에 바로 붙이지 않음). 형식이 이상하면 스크립트가 멈춘다.
+      - name: 시범 실행
+        timeout-minutes: 140
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          IDS: ${{ inputs.ids }}
+          CAP_USD: ${{ inputs.cap_usd }}
+          CMT_MOCK: ${{ inputs.mock && '1' || '' }}
+        run: node scripts/cmt/cmt_pilot.mjs --ids "$IDS" --cap-usd "$CAP_USD" --limit-usd 30 --wait-min 120 --summary "$GITHUB_STEP_SUMMARY"
+      - name: 결과물 올리기 (하루 보관)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmt-pilot-${{ github.run_id }}
+          path: cmt_out/
+          retention-days: 1
+          if-no-files-found: ignore
+      - name: 이 달 AI 사용액 커밋
+        if: always()
+        run: |
+          [ -f state/ai_state.json ] || exit 0
+          git config user.name "ehgowjd1-afk"
+          git config user.email "ehgowjd1@gmail.com"
+          git add state/ai_state.json
+          git diff --cached --quiet && exit 0
+          git commit -m "chore: AI 사용액 기록 (댓글 분석 시범)"
+          for i in 1 2 3; do git pull --rebase --autostash -X theirs && git push && exit 0 || (git rebase --abort 2>/dev/null; sleep 5); done
+          exit 1

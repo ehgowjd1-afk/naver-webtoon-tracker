@@ -13,3 +13,4 @@ scripts/.ai-key/
 scripts/.notion.json
 scripts/.notion_tables.json
 ai_out/
+cmt_out/
