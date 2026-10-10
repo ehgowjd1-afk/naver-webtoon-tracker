@@ -262,7 +262,7 @@ async function main() {
         const s = samples[k++];
         const cid = `${s.w.id}_${s.e.no}`;
         try {
-          const msg = await client.messages.create(params(s.text));
+          const msg = await client.messages.stream(params(s.text)).finalMessage();   // 답이 길 수 있어 실시간 전송(일반 요청은 SDK가 10분 넘을 수 있다며 막음)
           addUsage(usage, msg.usage || {});
           results[cid] = { ok: 1, json: textOf(msg), stop: msg.stop_reason };
         } catch (e) { results[cid] = { ok: 0, err: String(e.message || e).slice(0, 200) }; }
