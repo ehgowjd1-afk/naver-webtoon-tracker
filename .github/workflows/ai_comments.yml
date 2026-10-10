@@ -13,7 +13,7 @@ on:
         required: false
         default: "769209,793275"
       eps:
-        description: "최근 몇 화 (숫자) 또는 all"
+        description: "최근 몇 화 (숫자) / all / mix:20(최근 20화는 상위+무작위, 옛 회차는 상위 oldtop개만)"
         required: false
         default: "10"
       top:
@@ -24,6 +24,10 @@ on:
         description: "회차당 나머지 중 무작위 몇 개"
         required: false
         default: "70"
+      oldtop:
+        description: "mix일 때 옛 회차의 좋아요 상위 몇 개"
+        required: false
+        default: "30"
       maxreq:
         description: "최대 회차 수 (0 = 제한 없음)"
         required: false
@@ -31,7 +35,7 @@ on:
       wait:
         description: "submit 후 결과를 기다릴 분"
         required: false
-        default: "300"
+        default: "180"
       batches:
         description: "fetch 모드: 일괄 처리 id (쉼표)"
         required: false
@@ -65,6 +69,7 @@ jobs:
           --eps=${{ inputs.eps }}
           --top=${{ inputs.top }}
           --rand=${{ inputs.rand }}
+          --old-top=${{ inputs.oldtop }}
           --max-requests=${{ inputs.maxreq }}
           --wait-min=${{ inputs.wait }}
           --batches=${{ inputs.batches }}

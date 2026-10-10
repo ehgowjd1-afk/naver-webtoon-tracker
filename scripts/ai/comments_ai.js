@@ -132,11 +132,15 @@ async function episodes(id) {
   const nos = await NC.probeEpisodeNos(id, 1, 3000, 250);
   return { adult: true, eps: nos.map((no) => ({ no, label: '', at: '', preview: false })) };
 }
+// eps: 숫자 k = 최근 공개 k화 + 미리보기 앞쪽 최대 5화 / 'all' = 전부 / 'mix:k' = 전부, 단 최근 k화(+미리보기)만 recent 표시
+//      (recent는 상위 nTop + 무작위 nRand, 나머지 옛 회차는 상위 oldTop만 — 요청서 B안)
 function pickEpisodes(eps, n) {
-  if (n === 'all') return eps;
-  const k = Number(n) || 10;
   const pub = eps.filter((e) => !e.preview), prev = eps.filter((e) => e.preview);
-  return [...pub.slice(-k), ...prev.slice(0, 5)];   // 최근 공개 k화 + 미리보기(유료) 앞쪽 최대 5화
+  if (n === 'all') return eps.map((e) => ({ ...e, recent: true }));
+  const m = String(n).match(/^mix:(\d+)$/);
+  const k = m ? Number(m[1]) : (Number(n) || 10);
+  const recent = [...pub.slice(-k), ...prev.slice(0, 5)].map((e) => ({ ...e, recent: true }));
+  return m ? [...pub.slice(0, Math.max(0, pub.length - k)).map((e) => ({ ...e, recent: false })), ...recent] : recent;
 }
 
 // 한 회차 표본: 한 번 요청(베스트 15 + 최신 500) → 좋아요 상위 nTop + 나머지 중 무작위 nRand (회차별 고정 시드)
@@ -179,7 +183,7 @@ const params = (text) => ({
 });
 
 // 표본 모으기 (네이버 요청: 작업자 3 · 간격 250ms · 연속 실패 30번이면 멈춤)
-async function collect(targets, epsArg, nTop, nRand, maxReq) {
+async function collect(targets, epsArg, nTop, nRand, maxReq, oldTop = nTop) {
   const det = readJson(path.join(DATA, 'details.json'), {});
   const samples = [];
   let streak = 0, stop = false, reqs = 0, i = 0;
@@ -192,7 +196,7 @@ async function collect(targets, epsArg, nTop, nRand, maxReq) {
       for (const e of pickEpisodes(E.eps, epsArg)) {
         if (stop || (maxReq && reqs >= maxReq)) break;
         try {
-          const s = await episodeSample(w.id, e.no, nTop, nRand);
+          const s = await episodeSample(w.id, e.no, e.recent === false ? oldTop : nTop, e.recent === false ? 0 : nRand);
           streak = 0;
           if (s.comments.length) { samples.push({ w: { id: w.id, title: w.title, rank: w.rank, adult: w.adult }, e: { no: e.no, label: s.label || e.label, at: e.at, preview: !!e.preview }, total: s.total, poolSize: s.poolSize, complete: s.complete, comments: s.comments, text: userText(w, e, s, det) }); reqs++; }
         } catch (err) { if (err.status !== 404 && ++streak >= 30) { console.log('  ! 연속 실패 30번 — 멈춤'); stop = true; } }
@@ -247,7 +251,7 @@ async function main() {
   const epsArg = arg('eps', '10');
   const maxReq = Number(arg('max-requests', 0)) || 0;
   console.log(`앱 주간 ${T.week} · 대상 ${targets.length}작품 · 회차 ${epsArg} · 회차당 상위 ${nTop}+무작위 ${nRand} · ${mode}`);
-  const samples = await collect(targets, epsArg, nTop, nRand, maxReq);
+  const samples = await collect(targets, epsArg, nTop, nRand, maxReq, Number(arg('old-top', nTop)));
   const nComments = samples.reduce((s, x) => s + x.comments.length, 0);
   summary.week = T.week; summary.works = new Set(samples.map((x) => x.w.id)).size; summary.episodes = samples.length; summary.comments = nComments;
   console.log(`표본: ${summary.works}작품 · ${samples.length}회차 · 댓글 ${nComments}개`);
