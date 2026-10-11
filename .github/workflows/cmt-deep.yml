@@ -1,0 +1,87 @@
+name: 작품 분석 자세히
+
+# scripts/cmt/deep_dive.mjs 를 손으로만 돌립니다. 이미 댓글 분석이 된 작품(docs/data/cmt/{id}.json)의 먹힌·안 먹힌 요소를
+# 하나하나 구체적으로 쪼갭니다(어떤 매력·어떤 단계·어떤 연출인지, 드러난 회차, 독자 반응, 가져갈 점/피할 점).
+# 핵심 회차의 베스트 댓글을 로그인 없이 다시 모으고(2초 간격, 닉네임 버림) Sonnet 일괄 1건/작품. 결과는 사이트 파일에 붙여 커밋(원문 없음).
+
+on:
+  workflow_dispatch:
+    inputs:
+      ids:
+        description: "작품 titleId (쉼표로, 최대 60개)"
+        type: string
+        default: "801475"
+      cap_usd:
+        description: "이번 실행 비용 상한(달러)"
+        type: string
+        default: "3"
+      limit_usd:
+        description: "이 달 네이버 AI 한도(달러)"
+        type: string
+        default: "36"
+      lane:
+        description: "동시에 돌릴 줄 이름(a·b·c…)"
+        type: string
+        default: "a"
+      mock:
+        description: "가짜 답 모드(돈 안 듦)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ai-deep-${{ inputs.lane }}
+  cancel-in-progress: false
+
+jobs:
+  deep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Claude SDK 설치
+        run: npm install --no-save --no-package-lock @anthropic-ai/sdk@0.132.1
+      - name: 자세히 분석
+        timeout-minutes: 290
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          IDS: ${{ inputs.ids }}
+          CAP_USD: ${{ inputs.cap_usd }}
+          LIMIT_USD: ${{ inputs.limit_usd }}
+          CMT_MOCK: ${{ inputs.mock && '1' || '' }}
+        run: |
+          echo "$IDS" | grep -Eq '^[0-9]{3,9}(,[0-9]{3,9})*$' || { echo "ids 형식 오류"; exit 1; }
+          node scripts/cmt/deep_dive.mjs --ids "$IDS" --cap-usd "$CAP_USD" --limit-usd "$LIMIT_USD" --wait-min 280 --summary "$GITHUB_STEP_SUMMARY"
+      - name: 결과물 올리기 (하루 보관)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmt-deep-${{ github.run_id }}
+          path: cmt_out/
+          retention-days: 1
+          if-no-files-found: ignore
+      # 여러 줄이 동시에 돌 수 있어서: 최신 main 위에서 다시 붙이고 이번 실행이 쓴 금액만 더한 뒤 올림
+      - name: 사이트 반영 + 이 달 AI 사용액 커밋
+        if: always()
+        run: |
+          git config user.name "ehgowjd1-afk"
+          git config user.email "ehgowjd1@gmail.com"
+          for i in 1 2 3 4 5 6; do
+            git fetch -q origin main && git reset -q --hard origin/main
+            node scripts/cmt/apply_deep.mjs cmt_out/deep.json docs/data/cmt || echo "사이트 붙이기 실패(사용액만 커밋)"
+            node -e 'const fs=require("fs");let d;try{d=JSON.parse(fs.readFileSync("cmt_out/spend.json","utf8"))}catch(e){process.exit(0)}if(!d.delta)process.exit(0);const p="state/ai_state.json";let s={};try{s=JSON.parse(fs.readFileSync(p,"utf8"))}catch(e){}s.spend=s.spend||{};s.spend[d.month]=(s.spend[d.month]||0)+d.delta;fs.mkdirSync("state",{recursive:true});fs.writeFileSync(p,JSON.stringify(s,null,1)+"\n");console.log("이번 실행 사용액",d.delta.toFixed(3),"→ 이 달",s.spend[d.month].toFixed(2))'
+            [ -f state/ai_state.json ] && git add state/ai_state.json
+            [ -d docs/data/cmt ] && git add docs/data/cmt
+            git diff --cached --quiet && exit 0
+            git commit -q -m "data: 작품 분석 자세히 사이트 반영 + AI 사용액"
+            git push -q origin HEAD:main && exit 0
+            sleep $((5 + RANDOM % 20))
+          done
+          exit 1

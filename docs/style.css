@@ -327,3 +327,16 @@ footer a:hover{text-decoration:underline}
 .cthh{display:flex; justify-content:space-between; gap:10px; font-size:13px}
 .cthe{font-size:11.5px; color:var(--faint); margin-top:1px}
 .cfoot{font-size:11px; color:var(--faint); margin-top:14px; line-height:1.5}
+/* 요소 자세히 (deep_dive.mjs) */
+.cdeep{margin-top:9px; padding-top:8px; border-top:1px dashed var(--border-strong)}
+.cdeep summary{cursor:pointer; font-size:12px; font-weight:700; color:var(--accent-ink); list-style-position:inside}
+.cpt.p-bad .cdeep summary{color:var(--up)}
+.cparts{margin:6px 0 0; padding-left:18px; display:flex; flex-direction:column; gap:8px}
+.cparts li{font-size:12.5px; line-height:1.5}
+.cparts li b{font-size:13px; color:var(--ink)}
+.cpd{color:var(--ink); margin-top:1px}
+.cpr{color:var(--muted); font-size:12px; margin-top:1px}
+.cpr::before{content:"독자 반응 · "; color:var(--faint); font-weight:600}
+.cins{margin-top:9px; font-size:12.5px; line-height:1.5; padding:7px 9px; border-radius:7px; background:var(--surface); border:1px solid var(--border)}
+.cins b{color:var(--accent-ink); margin-right:4px}
+.cpt.p-bad .cins b{color:var(--up)}

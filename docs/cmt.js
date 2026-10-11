@@ -86,7 +86,11 @@
     if(A){
       h += `<details class="csec" open><summary>📝 작품 분석</summary>`;
       if(A.summary) h += `<p class="csum">${esc(A.summary)}</p>`;
-      const pts = (arr, cls, mark) => (arr || []).map(p => `<div class="cpt ${cls}"><div class="cpth"><span class="caxis">${esc(p.axis)}</span><b>${mark} ${esc(p.point)}</b></div><div class="cptw">${esc(p.why)}</div>${p.eps && p.eps.length ? `<div class="celinks">${epLinks(p.eps, eps)}</div>` : ""}</div>`).join("");
+      // 요소 자세히(deep_dive.mjs): 어떤 매력·어떤 단계·어떤 연출인지 쪼갠 것 + 가져갈 점/피할 점
+      const DEEPQ = { "캐릭터": "어떤 매력인지", "서사": "어떤 단계로 바뀌는지", "구조·전개": "어떤 구성인지", "작화·연출": "어떤 연출인지", "설정·세계관": "어떤 설정인지" };
+      const deepHtml = (p, bad) => !(p.deep && p.deep.parts && p.deep.parts.length) ? "" :
+        `<details class="cdeep" open><summary>${bad ? "무엇이 문제였는지" : (DEEPQ[p.axis] || "자세히")} — ${p.deep.parts.length}가지</summary><ol class="cparts">${p.deep.parts.map(x => `<li><b>${esc(x.name)}</b><div class="cpd">${esc(x.detail)}</div><div class="cpr">${esc(x.react)}</div>${x.eps && x.eps.length ? `<div class="celinks">${epLinks(x.eps, eps)}</div>` : ""}</li>`).join("")}</ol>${p.deep.insight ? `<div class="cins"><b>${bad ? "피할 점" : "가져갈 점"}</b> ${esc(p.deep.insight)}</div>` : ""}</details>`;
+      const pts = (arr, cls, mark) => (arr || []).map(p => `<div class="cpt ${cls}"><div class="cpth"><span class="caxis">${esc(p.axis)}</span><b>${mark} ${esc(p.point)}</b></div><div class="cptw">${esc(p.why)}</div>${p.eps && p.eps.length ? `<div class="celinks">${epLinks(p.eps, eps)}</div>` : ""}${deepHtml(p, cls === "p-bad")}</div>`).join("");
       if((A.strengths || []).length) h += `<div class="csub">먹힌 요소</div>` + pts(A.strengths, "p-good", "＋");
       if((A.weaknesses || []).length) h += `<div class="csub">안 먹힌 요소</div>` + pts(A.weaknesses, "p-bad", "－");
       if((A.turns || []).length) h += `<div class="csub">반응이 바뀐 회차</div>` + A.turns.map(t => { const e = eps.find(x => x.no === t.no); return `<div class="cturn"><button type="button" class="celink" data-ep="${t.no}">${esc(e ? label(e) : t.no + "번")}</button><div><b>${esc(t.what)}</b><span>${esc(t.effect)}</span></div></div>`; }).join("");
