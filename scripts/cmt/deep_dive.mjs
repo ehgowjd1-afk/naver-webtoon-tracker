@@ -125,12 +125,14 @@ function requestText(cm, info, best, num) {
 const EST_CHECK = 0.07;   // 작품 1개당 예상
 const CHECK_SCHEMA = {
   type: "object", additionalProperties: false, required: ["items"],
-  properties: { items: { type: "array", items: { type: "object", additionalProperties: false, required: ["k", "v", "name", "detail", "react", "line"],
-    properties: { k: { type: "string" }, v: { type: "string", enum: ["ok", "fix", "drop"] }, name: { type: "string" }, detail: { type: "string" }, react: { type: "string" }, line: { type: "string" } } } } }
+  properties: { items: { type: "array", items: { type: "object", additionalProperties: false, required: ["k", "facts", "v", "name", "detail", "react", "line"],
+    properties: { k: { type: "string" }, facts: { type: "string" }, v: { type: "string", enum: ["ok", "fix", "drop"] }, name: { type: "string" }, detail: { type: "string" }, react: { type: "string" }, line: { type: "string" } } } } }
 };
 const CHECK_SYSTEM = `당신은 사실 확인 담당입니다. 다른 AI가 웹툰 댓글을 근거로 쓴 분석 문장들을 근거 댓글 원문과 하나씩 대조합니다. 웹툰 그림은 볼 수 없으므로, 사실의 근거는 오직 그 항목의 근거 댓글과 작품 소개뿐입니다.
 
-항목(K번호)마다 판정합니다.
+항목(K번호)마다 먼저 facts에 근거 댓글 하나하나가 실제로 말하는 '누가·무엇'을 짧게 적습니다(예: '#12 누가 없음 / 안경 벗은 모습 칭찬', '#13 민경 / 안경 쓴 민경에게 농담'). 그다음 facts만 보고 판정합니다.
+칸은 상위 항목(예: 'S1 남주 이섭의 매력')에 속합니다. 칸 내용이 상위 항목의 인물·주제에 관한 것으로 읽히는데 근거 댓글이 그 인물 얘기가 아니면(다른 인물이거나 누구인지 없음) 틀린 것입니다 — 그 인물로 확인되는 내용만 남겨 fix하거나 drop.
+
 - ok: 문장의 핵심 내용 — 누가, 무엇을, 어느 회차에서, 독자가 어떻게 반응했는지 — 가 근거 댓글에 직접 나온다.
 - fix: 대체로 맞지만 일부(특히 누가 했는지, 어느 회차인지, 무슨 행동인지)가 근거 댓글에 없거나 틀렸다. 근거 댓글로 확인되는 내용만 남겨 고쳐 쓴다.
 - drop: 핵심 내용이 근거 댓글로 확인되지 않는다.
@@ -146,12 +148,20 @@ fix일 때: 칸이면 name·detail·react 세 칸을 모두 다시 씁니다(이
 고친 문장도 댓글 문장을 그대로 옮기지 않고 요약합니다. 쉬운 한국어로.`;
 function checkText(w) {
   const det = N.workInfo(w.id);
+  const A = w.cm.analysis || {}, R = A.readers || {}, title = {};
+  (A.strengths || []).forEach((p, i) => { title[`S${i + 1}`] = `먹힌 요소: ${p.point}`; });
+  (A.weaknesses || []).forEach((p, i) => { title[`W${i + 1}`] = `안 먹힌 요소: ${p.point}`; });
+  title.ID = "이 작품만의 특색"; title.RP = `독자층: ${clip(R.who || "", 60)}`; title.RC = `이탈 신호: ${clip(R.churn || "", 60)}`;
+  (R.wants || []).forEach((x, i) => { title[`RW${i + 1}`] = `바라는 것: ${x.want}`; });
+  (R.splits || []).forEach((x, i) => { title[`RS${i + 1}`] = `갈리는 지점: ${x.topic}`; });
+  w.cm.themes.slice(0, 24).forEach((t, i) => { title[`T${i + 1}`] = `반복 반응 묶음: ${t.l}`; });
+  for (const d of w.cm.dislike || []) title[DKEY[d.k]] = `불호: ${d.l}`;
   const epl = new Map(w.cm.eps.map((e) => [e.no, e.l || `${e.no}번`]));
   const ev = (refs) => refs.map((n) => { const c = w.num.get(n); return `#${n} (${epl.get(c.no)}) [${c.like}] ${clip(c.text, 160)}`; }).join("\n    ");
   const lines = [`[작품] ${w.cm.title}`, `[작품 소개] ${clip(det.desc || "-", 300)}`, "", "[확인할 항목] K번호 (어느 칸) 문장 / 근거 댓글"];
   for (const it of w.items) {
     const body = it.kind === "line" ? `한 줄 평: ${it.line}` : it.kind === "insight" ? `마무리 문장: ${it.insight}` : `이름: ${it.name} / 내용: ${it.detail} / 반응: ${it.react}`;
-    lines.push(`${it.k} (${it.key} ${it.kind === "part" ? "칸" : it.kind === "line" ? "한 줄 평" : "마무리"}) ${body}`, `    ${ev(it.refs)}`);
+    lines.push(`${it.k} [${it.key} ${title[it.key] || ""}] (${it.kind === "part" ? "칸" : it.kind === "line" ? "한 줄 평" : "마무리"}) ${body}`, `    ${ev(it.refs)}`);
   }
   return lines.join("\n");
 }
@@ -164,7 +174,7 @@ const report = { cost: { deep: 0, check: 0 }, batches: {}, notes: [], tokens: {}
 function charge(usd, label) { if (MOCK) return; state.spend[MONTH] = (state.spend[MONTH] || 0) + usd; mkdirSync("state", { recursive: true }); writeFileSync(STATE, JSON.stringify(state, null, 1) + "\n"); log(`  ${label} 비용 $${usd.toFixed(4)} → 이 달 합계 $${state.spend[MONTH].toFixed(2)}`); }
 const costOf = (m, u) => { const t = (report.tokens[m] ||= { in: 0, out: 0, calls: 0 }); t.in += u.input_tokens || 0; t.out += u.output_tokens || 0; t.calls++; return MOCK ? 0 : rawCost(m, u); };
 function mockAnswer(cid, body) {
-  if (cid.startsWith("c-")) return { items: [...body.matchAll(/^(K\d+) /gm)].map((m, i) => ({ k: m[1], v: ["ok", "fix", "drop"][i % 3], name: i % 3 === 1 ? "고친 이름" : "", detail: i % 3 === 1 ? "고친 내용" : "", react: "", line: i % 3 === 1 ? "고친 한 줄" : "" })) };
+  if (cid.startsWith("c-")) return { items: [...body.matchAll(/^(K\d+) /gm)].map((m, i) => ({ k: m[1], facts: "가짜", v: ["ok", "fix", "drop"][i % 3], name: i % 3 === 1 ? "고친 이름" : "", detail: i % 3 === 1 ? "고친 내용" : "", react: "", line: i % 3 === 1 ? "고친 한 줄" : "" })) };
   const keys = [...body.matchAll(/^(ID|S\d+|W\d+|RP|RW\d+|RS\d+|RC) /gm)].map((m) => m[1]);
   const lkeys = [...body.matchAll(/^(T\d+|DG|DS|DF) /gm)].map((m) => m[1]);
   const ns = [...body.matchAll(/^#(\d+) \[/gm)].map((m) => Number(m[1]));
