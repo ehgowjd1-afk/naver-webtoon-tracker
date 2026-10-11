@@ -116,7 +116,7 @@ function requestText(cm, info, best, num) {
   for (const [no, cs] of best) {
     const e = cm.eps.find((x) => x.no === no) || {};
     lines.push(`== ${no} ${e.l || ""} (댓글 ${e.c ?? "-"}${e.k ? ", " + e.k : ""}) ==`);
-    for (const c of cs) { const n = num.size + 1; num.set(n, { no, like: c.like, text: c.text }); lines.push(`#${n} [${c.like}] ${clip(c.text, 160)}`); }
+    for (const c of cs) { const n = num.size + 1; num.set(n, { no, like: c.like, text: c.text, cid: c.cid }); lines.push(`#${n} [${c.like}] ${clip(c.text, 160)}`); }
   }
   return lines.join("\n");
 }
@@ -125,8 +125,8 @@ function requestText(cm, info, best, num) {
 const EST_CHECK = 0.07;   // 작품 1개당 예상
 const CHECK_SCHEMA = {
   type: "object", additionalProperties: false, required: ["items"],
-  properties: { items: { type: "array", items: { type: "object", additionalProperties: false, required: ["k", "facts", "v", "name", "detail", "react", "line"],
-    properties: { k: { type: "string" }, facts: { type: "string" }, v: { type: "string", enum: ["ok", "fix", "drop"] }, name: { type: "string" }, detail: { type: "string" }, react: { type: "string" }, line: { type: "string" } } } } }
+  properties: { items: { type: "array", items: { type: "object", additionalProperties: false, required: ["k", "facts", "v", "kw", "more", "name", "detail", "react", "line"],
+    properties: { k: { type: "string" }, facts: { type: "string" }, v: { type: "string", enum: ["ok", "fix", "drop", "need"] }, kw: { type: "string" }, more: { type: "array", items: { type: "integer" } }, name: { type: "string" }, detail: { type: "string" }, react: { type: "string" }, line: { type: "string" } } } } }
 };
 const CHECK_SYSTEM = `당신은 사실 확인 담당입니다. 다른 AI가 웹툰 댓글을 근거로 쓴 분석 문장들을 근거 댓글 원문과 하나씩 대조합니다. 웹툰 그림은 볼 수 없으므로, 사실의 근거는 오직 그 항목의 근거 댓글과 작품 소개뿐입니다.
 
@@ -136,6 +136,9 @@ const CHECK_SYSTEM = `당신은 사실 확인 담당입니다. 다른 AI가 웹�
 - ok: 문장의 핵심 내용 — 누가, 무엇을, 어느 회차에서, 독자가 어떻게 반응했는지 — 가 근거 댓글에 직접 나온다.
 - fix: 대체로 맞지만 일부(특히 누가 했는지, 어느 회차인지, 무슨 행동인지)가 근거 댓글에 없거나 틀렸다. 근거 댓글로 확인되는 내용만 남겨 고쳐 쓴다.
 - drop: 핵심 내용이 근거 댓글로 확인되지 않는다.
+- need: 누구(또는 무엇) 얘기인지가 근거 댓글만으로는 불분명해서, 그 회차의 다른 댓글을 더 봐야 판단할 수 있다. kw에 그 회차 댓글에서 찾아볼 단어 1~3개를 쉼표로(예: 안경). 첫 확인에서만 씁니다.
+- '추가로 찾은 댓글'이 붙은 항목(두 번째 확인)은 need를 쓰지 않고 ok·fix·drop 중 하나로 정하고, 판단에 쓴 추가 댓글 번호를 more에 적습니다. 추가 댓글로 인물이 확인되면 그 인물로 고쳐 씁니다(fix). 그래도 불분명하면 drop.
+- need가 아니면 kw는 빈 문자열, more는 빈 배열.
 
 인물 판단 규칙
 - 누구의 행동·외모인지는 근거 댓글에 그 인물의 이름·호칭(남주·여주·OO아·OO 차장 등)이 직접 나오거나 문맥상 분명할 때만 인정합니다. 주어 없는 댓글('안경 벗으니 짱이네')을 특정 인물로 단정한 문장은 fix(누구인지 빼거나 근거로 확인되는 인물로) 또는 drop.
@@ -146,7 +149,7 @@ const CHECK_SYSTEM = `당신은 사실 확인 담당입니다. 다른 AI가 웹�
 fix일 때: 칸이면 name·detail·react 세 칸을 모두 다시 씁니다(이름에 틀린 내용이 들어 있으면 이름도 고치고, 바뀌지 않는 칸도 그대로 다시 씀). 한 줄 평이나 마무리 문장이면 line에 고친 전체 문장. 나머지는 빈 문자열. ok·drop이면 모두 빈 문자열.
 고친 문장에 '분명하지 않다', '확인되지 않는다' 같은 단서를 달지 말고, 근거로 확인되는 내용만 남겨 씁니다. 남길 내용이 없으면 drop.
 고친 문장도 댓글 문장을 그대로 옮기지 않고 요약합니다. 쉬운 한국어로.`;
-function checkText(w) {
+function checkText(w, second) {
   const det = N.workInfo(w.id);
   const A = w.cm.analysis || {}, R = A.readers || {}, title = {};
   (A.strengths || []).forEach((p, i) => { title[`S${i + 1}`] = `먹힌 요소: ${p.point}`; });
@@ -159,9 +162,10 @@ function checkText(w) {
   const epl = new Map(w.cm.eps.map((e) => [e.no, e.l || `${e.no}번`]));
   const ev = (refs) => refs.map((n) => { const c = w.num.get(n); return `#${n} (${epl.get(c.no)}) [${c.like}] ${clip(c.text, 160)}`; }).join("\n    ");
   const lines = [`[작품] ${w.cm.title}`, `[작품 소개] ${clip(det.desc || "-", 300)}`, "", "[확인할 항목] K번호 (어느 칸) 문장 / 근거 댓글"];
-  for (const it of w.items) {
+  for (const it of w.items.filter((x) => !second || x.need)) {
     const body = it.kind === "line" ? `한 줄 평: ${it.line}` : it.kind === "insight" ? `마무리 문장: ${it.insight}` : `이름: ${it.name} / 내용: ${it.detail} / 반응: ${it.react}`;
     lines.push(`${it.k} [${it.key} ${title[it.key] || ""}] (${it.kind === "part" ? "칸" : it.kind === "line" ? "한 줄 평" : "마무리"}) ${body}`, `    ${ev(it.refs)}`);
+    if (second) lines.push(`    추가로 찾은 댓글(그 회차 공개 직후 댓글 중 '${(it.need || []).join("·")}' 포함):`, (it.extra || []).length ? `    ${ev(it.extra)}` : "    (찾은 댓글 없음)");
   }
   return lines.join("\n");
 }
@@ -170,11 +174,12 @@ function checkText(w) {
 const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {};
 state.spend ||= {};
 const SPENT0 = state.spend[MONTH] || 0;
-const report = { cost: { deep: 0, check: 0 }, batches: {}, notes: [], tokens: {}, dropped: 0, kept: 0, checkOk: 0, checkFix: 0, checkDrop: 0 };
+const report = { cost: { deep: 0, check: 0, check2: 0 }, batches: {}, notes: [], tokens: {}, dropped: 0, kept: 0, checkOk: 0, checkFix: 0, checkDrop: 0, checkNeed: 0 };
 function charge(usd, label) { if (MOCK) return; state.spend[MONTH] = (state.spend[MONTH] || 0) + usd; mkdirSync("state", { recursive: true }); writeFileSync(STATE, JSON.stringify(state, null, 1) + "\n"); log(`  ${label} 비용 $${usd.toFixed(4)} → 이 달 합계 $${state.spend[MONTH].toFixed(2)}`); }
 const costOf = (m, u) => { const t = (report.tokens[m] ||= { in: 0, out: 0, calls: 0 }); t.in += u.input_tokens || 0; t.out += u.output_tokens || 0; t.calls++; return MOCK ? 0 : rawCost(m, u); };
 function mockAnswer(cid, body) {
-  if (cid.startsWith("c-")) return { items: [...body.matchAll(/^(K\d+) /gm)].map((m, i) => ({ k: m[1], facts: "가짜", v: ["ok", "fix", "drop"][i % 3], name: i % 3 === 1 ? "고친 이름" : "", detail: i % 3 === 1 ? "고친 내용" : "", react: "", line: i % 3 === 1 ? "고친 한 줄" : "" })) };
+  if (cid.startsWith("c-")) return { items: [...body.matchAll(/^(K\d+) /gm)].map((m, i) => ({ k: m[1], facts: "가짜", v: ["ok", "fix", "drop", "need"][i % 4], kw: i % 4 === 3 ? "안경" : "", more: [], name: i % 4 === 1 ? "고친 이름" : "", detail: i % 4 === 1 ? "고친 내용" : "", react: "", line: i % 4 === 1 ? "고친 한 줄" : "" })) };
+  if (cid.startsWith("e-")) return { items: [...body.matchAll(/^(K\d+) /gm)].map((m, i) => ({ k: m[1], facts: "가짜", v: i % 2 ? "drop" : "fix", kw: "", more: [...body.matchAll(/^    #(\d+) /gm)].map((x) => Number(x[1])).slice(-2), name: "추가 댓글로 고친 이름", detail: "추가 댓글로 고친 내용", react: "", line: "추가 댓글로 고친 한 줄" })) };
   const keys = [...body.matchAll(/^(ID|S\d+|W\d+|RP|RW\d+|RS\d+|RC) /gm)].map((m) => m[1]);
   const lkeys = [...body.matchAll(/^(T\d+|DG|DS|DF) /gm)].map((m) => m[1]);
   const ns = [...body.matchAll(/^#(\d+) \[/gm)].map((m) => Number(m[1]));
@@ -239,31 +244,64 @@ try {
   });
   // 2) 사실 확인 — 칸마다 근거 댓글 원문과 대조해 맞음 / 근거대로 고침 / 버림
   //    (2026-10-12 사용자 지적: '이섭의 연애' 3화 '안경 벗으니 짱'은 여주 민경인데 남주 이섭으로 씀 — 근거 개수만 보고 '누가'는 검사 안 했음)
-  const chk = works.filter((w) => w.items && w.items.length);
-  if (chk.length) await stage("사실 확인(Sonnet)", chk.map((w) => ({ custom_id: `c-${works.indexOf(w)}`, params: { model: SONNET.model, max_tokens: 32000, system: CHECK_SYSTEM,
-      messages: [{ role: "user", content: checkText(w) + "\n\n항목마다 판정해 JSON으로 쓰세요." }], output_config: { format: { type: "json_schema", schema: CHECK_SCHEMA }, effort: SONNET.effort } } })),
-    chk.length * EST_CHECK, "check", (res) => {
-      let usd = 0;
-      for (const [cid, r] of res) {
-        const w = works[Number(cid.split("-")[1])];
-        if (!w || r.type !== "succeeded") { report.notes.push(`사실 확인 실패 — 확인 안 된 칸은 올리지 않음: ${w ? w.cm.title : cid}`); if (w) w.items = []; continue; }
-        usd += costOf(SONNET.model, r.message.usage || {});
-        let p; try { p = parseJson(r.message); } catch (e) { report.notes.push(`사실 확인 해석 실패 — 올리지 않음: ${w.cm.title}`); w.items = []; continue; }
-        const v = new Map((p.items || []).map((x) => [x.k, x]));
-        w.items = w.items.filter((it) => {
-          const x = v.get(it.k);
-          if (!x || x.v === "drop") { report.checkDrop++; return false; }
-          if (x.v === "fix") {
-            report.checkFix++;
-            if (it.kind === "line") { if (x.line) it.line = x.line; }
-            else if (it.kind === "insight") { if (x.line) it.insight = x.line; }
-            else { if (!x.name || !x.detail) { report.checkDrop++; report.checkFix--; return false; } it.name = x.name; it.detail = x.detail; if (x.react) it.react = x.react; }   // 고칠 때 이름·내용을 다 안 주면 버림(틀린 이름이 남지 않게)
-          } else report.checkOk++;
-          return true;
-        });
+  //    누구(무엇) 얘기인지 근거만으로 불분명하면(need) → 그 회차 공개 직후 댓글에서 찾을 단어가 든 댓글을 더 모아 붙이고 한 번 더 확인
+  //    (2026-10-12 사용자: '베댓이 누가 누군지 명확하지 않을 때 댓글 확인과 검증 후에 쓰는 걸로, 다른 것도 다 검증')
+  const applyCheck = (w, p, second) => {
+    const v = new Map((p.items || []).map((x) => [x.k, x]));
+    w.items = w.items.filter((it) => {
+      if (second && !it.need) return true;   // 두 번째 확인은 불분명했던 칸만
+      const x = v.get(it.k);
+      if (!x || x.v === "drop") { report.checkDrop++; return false; }
+      if (x.v === "need") {
+        const kw = String(x.kw || "").split(/[,·\s]+/).map((s) => s.trim()).filter(Boolean).slice(0, 3);
+        if (second || !kw.length) { report.checkDrop++; return false; }   // 더 찾아봐도 불분명하면 버림
+        it.need = kw; report.checkNeed++; return true;
       }
-      return usd;
+      if (second) { const more = (x.more || []).filter((n) => (it.extra || []).includes(n)); it.refs = [...new Set([...it.refs, ...more])]; }
+      delete it.need;
+      if (x.v === "fix") {
+        report.checkFix++;
+        if (it.kind === "line") { if (x.line) it.line = x.line; }
+        else if (it.kind === "insight") { if (x.line) it.insight = x.line; }
+        else { if (!x.name || !x.detail) { report.checkDrop++; report.checkFix--; return false; } it.name = x.name; it.detail = x.detail; if (x.react) it.react = x.react; }   // 고칠 때 이름·내용을 다 안 주면 버림(틀린 이름이 남지 않게)
+      } else report.checkOk++;
+      return true;
     });
+  };
+  const checkStage = async (label, key, list, second) => {
+    if (!list.length) return;
+    await stage(label, list.map((w) => ({ custom_id: `${second ? "e" : "c"}-${works.indexOf(w)}`, params: { model: SONNET.model, max_tokens: 32000, system: CHECK_SYSTEM,
+        messages: [{ role: "user", content: checkText(w, second) + "\n\n항목마다 판정해 JSON으로 쓰세요." }], output_config: { format: { type: "json_schema", schema: CHECK_SCHEMA }, effort: SONNET.effort } } })),
+      list.length * (second ? EST_CHECK / 3 : EST_CHECK), key, (res) => {
+        let usd = 0;
+        for (const [cid, r] of res) {
+          const w = works[Number(cid.split("-")[1])];
+          if (!w || r.type !== "succeeded") { report.notes.push(`${label} 실패 — 확인 안 된 칸은 올리지 않음: ${w ? w.cm.title : cid}`); if (w) w.items = second ? w.items.filter((it) => !it.need) : []; continue; }
+          usd += costOf(SONNET.model, r.message.usage || {});
+          let p; try { p = parseJson(r.message); } catch (e) { report.notes.push(`${label} 해석 실패 — 올리지 않음: ${w.cm.title}`); w.items = second ? w.items.filter((it) => !it.need) : []; continue; }
+          applyCheck(w, p, second);
+        }
+        return usd;
+      });
+  };
+  await checkStage("사실 확인(Sonnet)", "check", works.filter((w) => w.items && w.items.length), false);
+  // 불분명한 칸: 근거 댓글이 달린 회차의 공개 직후 댓글 300개에서 찾을 단어가 든 댓글(좋아요 순 15개)을 더 붙임
+  const needW = works.filter((w) => w.items && w.items.some((it) => it.need));
+  for (const w of needW) {
+    const cache = new Map(), seen = new Set([...w.num.values()].map((c) => c.cid));
+    for (const it of w.items.filter((x) => x.need)) {
+      const nos = [...new Set(it.refs.map((n) => w.num.get(n).no))].slice(0, 3), found = [];
+      try {
+        for (const no of nos) {
+          if (!cache.has(no)) cache.set(no, (await N.fetchEarly(w.id, no, 300)).comments.map((c) => ({ ...c, no })));
+          found.push(...cache.get(no).filter((c) => !seen.has(c.cid) && it.need.some((k) => c.text.includes(k))));
+        }
+      } catch (e) { if (e instanceof N.NaverBlocked) throw e; }
+      it.extra = found.sort((a, b) => b.like - a.like).slice(0, 15).map((c) => { const n = w.num.size + 1; w.num.set(n, { no: c.no, like: c.like, text: c.text, cid: c.cid }); seen.add(c.cid); return n; });
+    }
+    log(`  ${w.cm.title}: 누구 얘기인지 불분명한 칸 ${w.items.filter((x) => x.need).length}개 → 그 회차 댓글을 더 찾아 다시 확인`);
+  }
+  await checkStage("불분명한 칸 다시 확인(Sonnet)", "check2", needW, true);
   // 3) 확정 — 회차 링크는 근거 댓글이 달린 회차, 칸마다 근거 수·좋아요, 원문 겹침 가림(공개 저장소)
   for (const w of works) {
     if (!w.items) continue;
@@ -291,8 +329,8 @@ try {
   writeFileSync(`${OUT}/deep.json`, JSON.stringify({ month: MONTH, mock: MOCK, works: out }));
   writeFileSync(`${OUT}/spend.json`, JSON.stringify({ month: MONTH, delta: (state.spend[MONTH] || 0) - SPENT0 }));
   const lines = [`## 작품·독자 분석 자세히${MOCK ? " (가짜 답)" : ""}`, `- 작품: ${works.map((w) => w.cm.title).join(", ")}`, `- 네이버 요청 ${N.requests}번`,
-    `- 자세히 쓴 작품 ${Object.keys(out).length}개 · 올린 칸 ${report.kept}개 · 근거 2개 미만이라 버린 칸 ${report.dropped}개 · 사실 확인: 맞음 ${report.checkOk} / 근거대로 고침 ${report.checkFix} / 확인 안 돼 버림 ${report.checkDrop}`,
-    `- AI 비용 $${(report.cost.deep + report.cost.check).toFixed(3)} (자세히 $${report.cost.deep.toFixed(3)} + 사실 확인 $${report.cost.check.toFixed(3)}) / 이 달 합계 $${(state.spend[MONTH] || 0).toFixed(2)}`,
+    `- 자세히 쓴 작품 ${Object.keys(out).length}개 · 올린 칸 ${report.kept}개 · 근거 2개 미만이라 버린 칸 ${report.dropped}개 · 사실 확인: 맞음 ${report.checkOk} / 근거대로 고침 ${report.checkFix} / 확인 안 돼 버림 ${report.checkDrop} · 불분명해서 댓글을 더 찾아 다시 확인 ${report.checkNeed}`,
+    `- AI 비용 $${(report.cost.deep + report.cost.check + report.cost.check2).toFixed(3)} (자세히 $${report.cost.deep.toFixed(3)} + 사실 확인 $${(report.cost.check + report.cost.check2).toFixed(3)}) / 이 달 합계 $${(state.spend[MONTH] || 0).toFixed(2)}`,
     `- 토큰: ${Object.entries(report.tokens).map(([m, t]) => `${m} 입력 ${t.in} · 출력 ${t.out} (${t.calls}번)`).join(" / ")}`,
     ...report.notes.map((n) => "- " + n), ...(report.error ? ["- 오류: " + report.error] : [])];
   log(lines.join("\n"));
