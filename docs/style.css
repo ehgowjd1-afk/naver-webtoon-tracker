@@ -254,26 +254,36 @@ footer a:hover{text-decoration:underline}
 .cymax{position:absolute; top:-2px; left:0; font-size:10.5px; color:var(--faint); pointer-events:none}
 .cscroll{overflow-x:auto; overflow-y:hidden; padding-top:14px; scrollbar-width:thin}
 .cbars{display:flex; align-items:flex-end; gap:1px; height:118px; border-bottom:1px solid var(--border-strong); background:linear-gradient(var(--border) 1px, transparent 1px) 0 50%/100% 50% no-repeat}
-.cbar{flex:1 1 0; min-width:2px; border:0; padding:0; margin:0; background:var(--accent); opacity:.55; border-radius:2px 2px 0 0; cursor:pointer; transition:opacity .1s}
+.cbar{position:relative; flex:1 1 0; min-width:2px; border:0; padding:0; margin:0; background:var(--accent); opacity:.55; border-radius:2px 2px 0 0; cursor:pointer; transition:opacity .1s}
 .cbar:hover{opacity:.9}
-.cbar.k-up{background:var(--down); opacity:.85}   /* 댓글 급증 = 파랑, 급감 지점 = 빨강(사용자 요청 2026-10-11) */
-.cbar.k-down{background:var(--up); opacity:.85}
+/* 막대 색 = 독자 반응(열광 진초록·좋음 연초록·밋밋 회색·갈림 금색·실망 빨강), 급증·급감은 ▲▼ (사용자 요청 2026-10-11) */
+.cbar.m-hot{background:var(--accent); opacity:1}
+.cbar.m-good{background:var(--accent); opacity:.45}
+.cbar.m-flat{background:var(--same); opacity:.55}
+.cbar.m-mixed{background:var(--gold); opacity:.9}
+.cbar.m-cold{background:var(--up); opacity:.9}
+.cbar.k-up::before,.cbar.k-down::before{position:absolute; bottom:100%; left:50%; transform:translateX(-50%); font-size:8px; line-height:1; color:var(--ink); pointer-events:none}
+.cbar.k-up::before{content:"▲"} .cbar.k-down::before{content:"▼"}
 .cbar.sel{opacity:1; outline:2px solid var(--ink); outline-offset:0}
 .cbar:focus-visible{outline:2px solid var(--ink)}
 .cxax{display:flex; justify-content:space-between; gap:8px; font-size:10.5px; color:var(--faint); margin-top:4px}
 .cxax span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40%}
-.cleg{display:flex; align-items:center; gap:4px; max-width:none !important}
-.cleg i{width:8px; height:8px; border-radius:2px; display:inline-block; margin-left:6px}
-.cleg i.k-up{background:var(--down)} .cleg i.k-down{background:var(--up)}
+.cleg{display:flex; flex-wrap:wrap; align-items:center; gap:4px 10px; font-size:10.5px; color:var(--muted); margin-top:6px}
+.cleg span{display:flex; align-items:center; gap:4px; white-space:nowrap}
+.cleg i{width:8px; height:8px; border-radius:2px; display:inline-block}
+.cleg .cleg-t{color:var(--faint); font-weight:600}
+.cleg .cleg-k{color:var(--ink)}
+.cleg i.m-hot{background:var(--accent)} .cleg i.m-good{background:var(--accent); opacity:.45} .cleg i.m-flat{background:var(--same)} .cleg i.m-mixed{background:var(--gold)} .cleg i.m-cold{background:var(--up)}
 .chint{font-size:11.5px; color:var(--muted); margin-top:6px; min-height:17px}
 .cep{margin-top:10px; padding:11px 12px; border-radius:10px; background:var(--surface-2)}
 .ceph{display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap}
 .ceph b{font-size:14px} .ceph span{font-size:12px; color:var(--muted)}
 .cchips{display:flex; flex-wrap:wrap; gap:5px; margin-top:7px}
 .cchip{font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; background:var(--surface); color:var(--muted); border:1px solid var(--border)}
-.cchip.k-down,.cchip.m-hot{color:var(--up); background:var(--up-soft); border-color:transparent}
-.cchip.k-up,.cchip.m-cold{color:var(--down); background:var(--down-soft); border-color:transparent}
+.cchip.m-hot{color:var(--on-accent); background:var(--accent); border-color:transparent}
+.cchip.m-cold{color:var(--up); background:var(--up-soft); border-color:transparent}
 .cchip.m-good{color:var(--accent-ink); background:var(--accent-soft); border-color:transparent}
+.cchip.m-flat{color:var(--muted)}
 .cchip.m-mixed{color:var(--gold); border-color:var(--gold)}
 .cchip.c-ext{color:var(--faint)}
 .crow{display:flex; gap:10px; margin-top:8px; font-size:13px; line-height:1.55}

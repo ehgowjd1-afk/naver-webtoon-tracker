@@ -17,7 +17,8 @@
   const work = id => C.works[id] || (C.works[id] = cidx().then(ix => (ix && ix.works && ix.works[id]) ? get(`data/cmt/${id}.json`) : null));
   const epInfo = id => C.eps[id] || (C.eps[id] = get(`data/episodes/${id}.json`));
 
-  const MOOD = { hot:["열광","m-hot"], good:["좋음","m-good"], mixed:["갈림","m-mixed"], cold:["실망","m-cold"], flat:["밋밋","m-flat"] };
+  // 막대 색 = 그 회차 독자 반응(AI가 댓글로 본 분위기). 댓글이 급증해도 반응이 나쁘면 빨강 — 급증·급감은 막대 위 ▲▼로만 표시
+  const MOOD = { hot:["열광","m-hot"], good:["좋음","m-good"], flat:["밋밋","m-flat"], mixed:["갈림","m-mixed"], cold:["실망","m-cold"] };
   const BUCKET = { like:["좋다는 말","b-like"], talk:["많이 하는 말","b-talk"], dislike:["불호","b-dis"] };
   const DK = ["고구마","캐릭터 답답","전개 억지"];
   const TONEGRP = [["칭찬·환호",["praise"],"t-praise"],["과몰입·투정",["char","tease","nudge"],"t-char"],["추리",["theory"],"t-theory"],["불호",["critic"],"t-critic"],["기타",["other","fan"],"t-other"]];
@@ -33,15 +34,17 @@
     return [...m.values()].filter(x => x.c > 0).sort((a, b) => a.no - b.no);
   }
   const label = e => e.l || `${e.no}번`;
-  const kcls = e => !e.a ? "" : e.a.k === "급증" ? " k-up" : (e.a.k === "급감 직전" || e.a.k === "급감 시작") ? " k-down" : "";
+  const kcls = e => !e.a ? "" : (e.a.m && MOOD[e.a.m] ? " " + MOOD[e.a.m][1] : "") + (e.a.k === "급증" ? " k-up" : e.a.k === "급감 직전" ? " k-down" : "");
 
   function chartHtml(eps, sel){
     const mx = Math.max(...eps.map(e => e.c)), n = eps.length, wide = n > 140;
     const bars = eps.map(e => `<button type="button" class="cbar${kcls(e)}${e.no === sel ? " sel" : ""}" data-ep="${e.no}" style="height:${Math.max(2, Math.round(e.c / mx * 100))}%" aria-label="${esc(label(e))} 댓글 ${num(e.c)}개"></button>`).join("");
-    const legend = eps.some(e => e.a && e.a.k) ? `<span class="cleg"><i class="k-up"></i>댓글 급증 <i class="k-down"></i>급감 지점</span>` : "";
+    const moods = Object.keys(MOOD).filter(m => eps.some(e => e.a && e.a.m === m));
+    const legend = (moods.length ? `<span class="cleg-t">독자 반응</span>` + moods.map(m => `<span><i class="${MOOD[m][1]}"></i>${MOOD[m][0]}</span>`).join("") : "") +
+      (eps.some(e => e.a && e.a.k) ? `<span class="cleg-k">▲ 댓글 급증</span><span class="cleg-k">▼ 급감 지점</span>` : "");
     return `<div class="cchart-wrap"><div class="cymax tnum">${man(mx)}</div>
       <div class="cscroll"${wide ? ` data-wide="1"` : ""}><div class="cbars" style="${wide ? `min-width:${n * 3}px` : ""}">${bars}</div></div>
-      <div class="cxax"><span>${esc(label(eps[0]))}</span>${legend}<span>${esc(label(eps[n - 1]))}</span></div></div>`;
+      <div class="cxax"><span>${esc(label(eps[0]))}</span><span>${esc(label(eps[n - 1]))}</span></div>${legend ? `<div class="cleg">${legend}</div>` : ""}</div>`;
   }
   function dailyHtml(h, id){
     const w = h && h.works && h.works[id]; if(!w) return "";
@@ -55,11 +58,11 @@
   function epPanel(e, an){
     if(!e) return "";
     const a = e.a, chips = [];
-    if(a && a.x) chips.push(`<span class="cchip ${a.k === "급증" ? "k-up" : ""}">앞뒤 회차의 ${a.x}배</span>`);
-    if(a && a.dr) chips.push(`<span class="cchip k-down">이후 ${a.dr}%↓</span>`);
+    if(a && a.x) chips.push(`<span class="cchip">${a.k === "급증" ? "▲ 댓글 급증 · " : ""}앞뒤 회차의 ${a.x}배</span>`);
+    if(a && a.dr) chips.push(`<span class="cchip">▼ 이후 댓글 ${a.dr}% 줄어듦</span>`);
     for(const f of (a && a.f) || []) if(f !== "댓글 급증") chips.push(`<span class="cchip">${esc(f)}</span>`);
     for(const x of (a && a.ext) || []) chips.push(`<span class="cchip c-ext">${esc(x)}</span>`);
-    if(a && a.m && MOOD[a.m]) chips.unshift(`<span class="cchip ${MOOD[a.m][1]}">${MOOD[a.m][0]}</span>`);
+    if(a && a.m && MOOD[a.m]) chips.unshift(`<span class="cchip ${MOOD[a.m][1]}">독자 반응 ${MOOD[a.m][0]}</span>`);
     let h = `<div class="cep"><div class="ceph"><b>${esc(label(e))}</b><span class="tnum">${e.d ? esc(e.d) + " · " : ""}댓글 ${num(e.c)}개${e.star ? " · ★" + e.star : ""}</span></div>`;
     if(chips.length) h += `<div class="cchips">${chips.join("")}</div>`;
     if(a && (a.s || a.r)){
@@ -140,7 +143,7 @@
       el.querySelector(".cepbox").innerHTML = epPanel(eps.find(e => e.no === no), an);
     };
     el.onclick = ev => { const t = ev.target.closest("[data-ep]"); if(!t) return; pick(+t.dataset.ep); if(t.classList.contains("celink")) el.querySelector(".cchart-wrap").scrollIntoView({ block:"nearest", behavior:"smooth" }); };
-    el.onmouseover = ev => { const t = ev.target.closest(".cbar"); if(!t) return; const e = eps.find(x => x.no === +t.dataset.ep); const hint = el.querySelector(".chint"); if(e && hint) hint.textContent = `${label(e)} · 댓글 ${num(e.c)}개${e.d ? " · " + e.d : ""}${e.a && e.a.k ? " · " + e.a.k : ""}`; };
+    el.onmouseover = ev => { const t = ev.target.closest(".cbar"); if(!t) return; const e = eps.find(x => x.no === +t.dataset.ep); const hint = el.querySelector(".chint"); if(e && hint) hint.textContent = `${label(e)} · 댓글 ${num(e.c)}개${e.d ? " · " + e.d : ""}${e.a && e.a.m && MOOD[e.a.m] ? " · 반응 " + MOOD[e.a.m][0] : ""}${e.a && e.a.k ? " · " + e.a.k : ""}`; };
     el.onmouseleave = () => { const hint = el.querySelector(".chint"); if(hint) hint.textContent = `막대를 누르면 그 회차를 볼 수 있어요${an ? " — AI가 댓글로 짐작한 내용·반응이 함께 나와요" : ""}`; };
   }
   window.CMT = { render };
