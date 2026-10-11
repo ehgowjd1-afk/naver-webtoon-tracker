@@ -13,7 +13,7 @@ import { createBatcher, costOf as rawCost } from "./batch.mjs";
 import { parseJson } from "./cmt_ai.mjs";
 
 const SONNET = { model: "claude-sonnet-5-5", effort: "medium" };
-const EST_WORK = 0.12;
+const EST_WORK = 0.075;   // 작품 1개당 예상(시범 실측 0.062 + 여유)
 const MOCK = !!process.env.CMT_MOCK;
 const STATE = "state/ai_state.json", OUT = "cmt_out";
 const args = { ids: [], capUsd: 3, limitUsd: 36, waitMin: 200, summary: null };
