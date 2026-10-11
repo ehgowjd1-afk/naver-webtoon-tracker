@@ -55,7 +55,8 @@ function revenueFor(name, epOverride, selfPn){
 const SOURCES = {
   app:     { label:"앱 주간", variants:null, subs:()=>["전체","여성","남성"].map(k=>[k,String((APP&&APP.charts&&APP.charts[k]||[]).length)]), data:(v,s)=>APP&&APP.charts[s], caps:{move:1,streak:1,badge:1,tiles:1,gap:1}, filters:F_APP, sorts:S_APP, note:()=>`${weekLabel(APP.date)} · 앱 「이번 주 웹툰 랭킹」` },
   weekday: { label:"요일별", variants:[["app","모바일"],["web","웹"]], subs:()=>WEEKDAYS, data:(v,s)=>WEEKDAY&&WEEKDAY[v]&&WEEKDAY[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(WEEKDAY.date)} · 요일별 인기순 · ${v==="app"?"모바일":"웹(PC)"} · 자동` },
-  genre:   { label:"장르", variants:[["app","모바일"],["web","웹"]], subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE[v]&&GENRE[v][s], caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(GENRE.date)} · 장르별 인기순 · ${v==="app"?"모바일":"웹(PC)"} · 자동` },
+  genre:   { label:"장르", variants:[["app","모바일"],["web","웹"]], subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE[v]&&notDone(GENRE[v][s]), caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(GENRE.date)} · 장르별 인기순 · ${v==="app"?"모바일":"웹(PC)"} · 자동 · 완결작은 완결 탭으로 옮김(순위 번호는 네이버 원래 순위)` },
+  done:    { label:"완결", variants:null, subs:()=>doneSubs(), data:(v,s)=>doneWorkSet(s), caps:{revenue:1,badge:1,done:1}, filters:F_MIN, sorts:[["fav","관심수순"],["total","총거래액순"],["per","회차당순"]], note:()=>`완결된 웹툰 · 장르·신작·성인 목록에서 옮겨 왔어요` },
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][platform]&&SERIES[v][platform][scat]&&SERIES[v][platform][scat][s], caps:{move:1,tiles:1,series:1,badge:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · ${platform==="web"?"웹(PC)":"모바일"} · ${scat} · 자동` },
   promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_MIN, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
   revenue: { label:"매출순", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revenue:1,badge:1}, filters:F_MIN, sorts:[["per","회차당순"],["total","총거래액순"],["deal","주단위거래액순"]], note:()=>`시리즈 거래 추정 · 단가=(대여×0.9+소장×0.1)×100 · 총거래액=다운수×단가 · 회차당=총거래액×0.9×0.6÷시리즈 회차수 · 주단위거래액=이번주−지난주 누적` },
@@ -64,10 +65,23 @@ const SOURCES = {
 };
 const REVSUBS=[["전체","전체"],["adult","🔞성인"],["dailyplus","매일+"],["mon","월"],["tue","화"],["wed","수"],["thu","목"],["fri","금"],["sat","토"],["sun","일"]];
 /* 성인(19금) 작품만: 웹툰 자체의 성인 플래그(details.adult = comic.naver가 막는 19금 웹툰). 새 성인신작 감지되면 매일 자동 추가 */
+/* 완결: details.day 가 'N화 완결'인 웹툰 — 장르·신작·성인 매출 목록에서 빼서 '완결' 탭으로(사용자 요청 2026-10-12) */
+const isDone = id => !!(id!=null && DETAILS && DETAILS[id] && /완결/.test(DETAILS[id].day||""));
+const notDone = arr => (arr||[]).filter(x => !isDone(x.id!=null ? x.id : (x.t!=null ? LOOKUP.name[x.t] : null)));
+function doneWorkSet(g){
+  if(!DETAILS || !LOOKUP.id) return [];
+  const out=[];
+  for(const id in DETAILS){ if(isDone(id) && LOOKUP.id[id] && (g==="전체" || DETAILS[id].g===g)) out.push({id:+id, r:0}); }
+  return out;
+}
+function doneSubs(){
+  const c={}; if(DETAILS) for(const id in DETAILS) if(isDone(id) && LOOKUP.id[id]) c[DETAILS[id].g||"기타"]=(c[DETAILS[id].g||"기타"]||0)+1;
+  return [["전체","전체"], ...Object.entries(c).sort((a,b)=>b[1]-a[1]).map(([g])=>[g,g])];
+}
 function adultWorkSet(){
   if(!DETAILS || !LOOKUP.id) return [];
   const out=[];
-  for(const id in DETAILS){ if(DETAILS[id] && DETAILS[id].adult && LOOKUP.id[id]) out.push({id:+id, r:0}); }
+  for(const id in DETAILS){ if(DETAILS[id] && DETAILS[id].adult && LOOKUP.id[id] && !isDone(id)) out.push({id:+id, r:0}); }
   return out;
 }
 function revenueWorkSet(s){
@@ -83,11 +97,11 @@ function parseLaunch(s){ const m=String(s||"").match(/(\d{2})\.(\d{2})\.(\d{2})/
 function newWorkSet(days){
   if(!DETAILS||!LOOKUP.id) return [];
   const cutoff=Date.now()-(days||30)*86400000, out=[];
-  for(const id in DETAILS){ const lt=parseLaunch(DETAILS[id].launch); if(lt && lt>=cutoff && LOOKUP.id[id]) out.push({id:+id, r:0}); }
+  for(const id in DETAILS){ const lt=parseLaunch(DETAILS[id].launch); if(lt && lt>=cutoff && LOOKUP.id[id] && !isDone(id)) out.push({id:+id, r:0}); }   // 완결작은 완결 탭으로
   out.sort((a,b)=>parseLaunch(DETAILS[b.id].launch)-parseLaunch(DETAILS[a.id].launch));
   return out;
 }
-const GROUPS=[["naver","네이버웹툰",["app","weekday","genre","revenue","newworks","revchange"]],["series","시리즈",["series","promo"]]];
+const GROUPS=[["naver","네이버웹툰",["app","weekday","genre","revenue","newworks","revchange","done"]],["series","시리즈",["series","promo"]]];
 let group="naver";
 const subLabel = s => src==="app" ? s : (SOURCES[src].subs().find(x=>x[0]===s)||[s,s])[1];
 const varLabel = () => { const vs=SOURCES[src].variants; return vs?(vs.find(x=>x[0]===variant)||["",""])[1]:""; };
@@ -404,7 +418,8 @@ function selectSrc(k){
   document.getElementById("q").value="";
   if(k==="series" && !SERIES){ document.getElementById("board").innerHTML=`<li class="empty">시리즈 불러오는 중…</li>`; ensureSeries().then(()=>{ setupSeriesCtl(); renderView(); }); return; }
   if(k==="promo" && !PROMO){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensurePromo().then(()=>renderView()); return; }
-  if((k==="revenue"||k==="newworks"||k==="revchange") && (!SERIES||!SERIESDET||!DETAILS||(k==="revchange"&&!REVHIST))){ document.getElementById("board").innerHTML=`<li class="empty">${k==="newworks"?"신작":k==="revchange"?"매출 변동":"매출"} 데이터 불러오는 중…</li>`; Promise.all([ensureSeries(),ensureSeriesDetails(),ensureDetails(),ensureRevHist()]).then(()=>{ SNAMEIDX=null; renderView(); }); return; }
+  if(k==="genre" && !DETAILS){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureDetails().then(()=>{ if(src==="genre") renderView(); }); return; }
+  if((k==="revenue"||k==="newworks"||k==="revchange"||k==="done") && (!SERIES||!SERIESDET||!DETAILS||(k==="revchange"&&!REVHIST))){ document.getElementById("board").innerHTML=`<li class="empty">${k==="newworks"?"신작":k==="revchange"?"매출 변동":k==="done"?"완결":"매출"} 데이터 불러오는 중…</li>`; Promise.all([ensureSeries(),ensureSeriesDetails(),ensureDetails(),ensureRevHist()]).then(()=>{ SNAMEIDX=null; renderView(); }); return; }
   if(k==="series") setupSeriesCtl();
   renderView();
 }
@@ -521,6 +536,11 @@ function renderList(){
     rows=[...rows].sort((a,b)=> (!a._wr||!b._wr) ? ((!a._wr)-(!b._wr)) : sMode==="loss" ? (a._wr.sortKey-b._wr.sortKey) : (b._wr.sortKey-a._wr.sortKey));   // 주간 대기는 맨 뒤
     let rk=0; rows.forEach(d=>{ d._rk = d._wr ? ++rk : "–"; });
   }
+  else if(caps.done && sMode==="fav"){
+    const fv=d=>(DETAILS&&DETAILS[d.id]&&DETAILS[d.id].fav)||0;
+    rows=[...rows].sort((a,b)=>fv(b)-fv(a));
+    rows.forEach((d,i)=>{ d._rk=i+1; });
+  }
   else if(caps.revenue && sMode==="recent"){
     const lt=d=>parseLaunch(DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch);
     rows=[...rows].sort((a,b)=>lt(b)-lt(a));
@@ -549,7 +569,7 @@ function renderList(){
     const thumb=d.th?`<img class="thumb" loading="lazy" src="${esc(d.th)}" alt="">`:`<div class="thumb ph">🎬</div>`;
     return `<li class="rowli ${rk<=3?"top"+rk:""}" role="button" tabindex="0" data-i="${i}">
       <div class="rk tnum">${rk}</div>${thumb}
-      <div class="cell"><div class="ttl"><span class="name">${esc(d.name)}</span>${badgeHtml(d)}</div><div class="auth">${esc(d.a)}${caps.newworks&&DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch?` · <span style="color:var(--accent)">🆕 ${esc(DETAILS[d.id].launch)}</span>`:""}</div></div>
+      <div class="cell"><div class="ttl"><span class="name">${esc(d.name)}</span>${badgeHtml(d)}</div><div class="auth">${esc(d.a)}${caps.done&&DETAILS&&DETAILS[d.id]?` · <span style="color:var(--muted)">${esc(DETAILS[d.id].day||"")}${DETAILS[d.id].fav?" · 관심 "+DETAILS[d.id].fav.toLocaleString():""}</span>`:""}${caps.newworks&&DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch?` · <span style="color:var(--accent)">🆕 ${esc(DETAILS[d.id].launch)}</span>`:""}</div></div>
       ${caps.revchange ? revChangeHtml(d) : showRev ? revHtml(d) : (caps.move?moveHtml(d.m):"")}
     </li>`;
   }).join("");
