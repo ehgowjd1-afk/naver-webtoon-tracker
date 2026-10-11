@@ -92,7 +92,9 @@
       const deepBlock = (d, title, insLabel) => !(d && d.parts && d.parts.length) ? "" :
         `<details class="cdeep" open><summary>${esc(title)} — ${d.parts.length}가지</summary><ol class="cparts">${d.parts.map(x => `<li><b>${esc(x.name)}</b><div class="cpd">${esc(x.detail)}</div><div class="cpr">${esc(x.react)}</div>${x.n ? `<div class="cref">근거 댓글 ${x.n}개 · 좋아요 ${man(x.lk)}</div>` : ""}${x.eps && x.eps.length ? `<div class="celinks">${epLinks(x.eps, eps)}</div>` : ""}</li>`).join("")}</ol>${d.insight ? `<div class="cins"><b>${esc(insLabel)}</b> ${esc(d.insight)}</div>` : ""}</details>`;
       const deepHtml = (p, bad) => deepBlock(p.deep, bad ? "무엇이 문제였는지" : (DEEPQ[p.axis] || "자세히"), bad ? "피할 점" : "가져갈 점");
-      const pts = (arr, cls, mark) => (arr || []).map(p => `<div class="cpt ${cls}"><div class="cpth"><span class="caxis">${esc(p.axis)}</span><b>${mark} ${esc(p.point)}</b></div><div class="cptw">${esc(p.why)}</div>${p.eps && p.eps.length ? `<div class="celinks">${epLinks(p.eps, eps)}</div>` : ""}${deepHtml(p, cls === "p-bad")}</div>`).join("");
+      // 이 작품만의 특색(정체성) — 어느 작품에나 붙는 말이 아니라 이 작품에만 있는 결
+      if(A.identity && A.identity.parts && A.identity.parts.length) h += `<div class="cpt p-id"><div class="cpth"><b>🧬 이 작품만의 특색</b></div>${A.identity.insight ? `<div class="cidl">${esc(A.identity.insight)}</div>` : ""}${deepBlock({ parts: A.identity.parts }, "무엇이 이 작품다운지", "")}</div>`;
+      const pts = (arr, cls, mark) => (arr || []).map(p =>`<div class="cpt ${cls}"><div class="cpth"><span class="caxis">${esc(p.axis)}</span><b>${mark} ${esc(p.point)}</b></div><div class="cptw">${esc(p.why)}</div>${p.eps && p.eps.length ? `<div class="celinks">${epLinks(p.eps, eps)}</div>` : ""}${deepHtml(p, cls === "p-bad")}</div>`).join("");
       if((A.strengths || []).length) h += `<div class="csub">먹힌 요소</div>` + pts(A.strengths, "p-good", "＋");
       if((A.weaknesses || []).length) h += `<div class="csub">안 먹힌 요소</div>` + pts(A.weaknesses, "p-bad", "－");
       if((A.turns || []).length) h += `<div class="csub">반응이 바뀐 회차</div>` + A.turns.map(t => { const e = eps.find(x => x.no === t.no); return `<div class="cturn"><button type="button" class="celink" data-ep="${t.no}">${esc(e ? label(e) : t.no + "번")}</button><div><b>${esc(t.what)}</b><span>${esc(t.effect)}</span></div></div>`; }).join("");
@@ -117,12 +119,12 @@
         h += `</details>`;
       }
     }
-    const col = b => { const ts = an.themes.filter(t => t.b === b).slice(0, 8); return ts.length ? ts.map(t => `<div class="cth"><div class="cthh"><span>${esc(t.l)}</span><b class="tnum">${num(t.n)}</b></div><div class="cthe">좋아요 ${man(t.lk)} · ${t.e.slice(0, 3).map(([l, n]) => `${esc(l)} ${n}`).join(", ")}</div></div>`).join("") : `<div class="cmuted">없음</div>`; };
+    const col = b => { const ts = an.themes.filter(t => t.b === b).slice(0, 8); return ts.length ? ts.map(t => `<div class="cth"><div class="cthh"><span>${esc(t.l)}</span><b class="tnum">${num(t.n)}</b></div>${t.line ? `<div class="cthl">${esc(t.line.line)} <span class="cref">근거 댓글 ${t.line.n}</span></div>` : ""}<div class="cthe">좋아요 ${man(t.lk)} · ${t.e.slice(0, 3).map(([l, n]) => `${esc(l)} ${n}`).join(", ")}</div></div>`).join("") : `<div class="cmuted">없음</div>`; };
     const dis = an.dislike.filter(x => x.n).sort((a, b) => b.n - a.n);
     h += `<details class="csec"><summary>💬 반복되는 반응 (댓글 ${num(an.n.total)}개)</summary>
       <div class="csub"><span class="ctag b-like">좋다는 말</span></div>${col("like")}
       <div class="csub"><span class="ctag b-talk">많이 하는 말</span></div>${col("talk")}
-      <div class="csub"><span class="ctag b-dis">불호</span> 고구마·캐릭터 답답·전개 억지만, 한 번 더 확인한 것</div>${dis.length ? dis.map(x => `<div class="cth"><div class="cthh"><span>${esc(DK[["goguma","stuffy","forced"].indexOf(x.k)] || x.l)}</span><b class="tnum">${num(x.n)}</b></div><div class="cthe">좋아요 ${man(x.lk)} · 몰린 회차 ${x.e.slice(0, 3).map(([l, n]) => `${esc(l)} ${n}`).join(", ")}</div></div>`).join("") : `<div class="cmuted">뚜렷한 불호 없음</div>`}
+      <div class="csub"><span class="ctag b-dis">불호</span> 고구마·캐릭터 답답·전개 억지만, 한 번 더 확인한 것</div>${dis.length ? dis.map(x => `<div class="cth"><div class="cthh"><span>${esc(DK[["goguma","stuffy","forced"].indexOf(x.k)] || x.l)}</span><b class="tnum">${num(x.n)}</b></div>${x.line ? `<div class="cthl">${esc(x.line.line)} <span class="cref">근거 댓글 ${x.line.n}</span></div>` : ""}<div class="cthe">좋아요 ${man(x.lk)} · 몰린 회차 ${x.e.slice(0, 3).map(([l, n]) => `${esc(l)} ${n}`).join(", ")}</div></div>`).join("") : `<div class="cmuted">뚜렷한 불호 없음</div>`}
       ${col("dislike") !== `<div class="cmuted">없음</div>` ? `<div class="csub">불호 쪽 반복 반응</div>${col("dislike")}` : ""}
     </details>`;
     h += `<div class="cfoot">AI 분석 · 전 회차 베스트 댓글 ${num(an.n.best)}개 + 댓글이 튄 회차의 공개 직후 ${num(an.n.early)}개 · 휴재·작가 인사 같은 얘기 ${num(an.n.ops)}개는 뺐어요 · ${esc(an.updated)} 기준</div>`;

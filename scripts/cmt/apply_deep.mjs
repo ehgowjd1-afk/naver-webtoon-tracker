@@ -18,6 +18,11 @@ for (const [id, pts] of Object.entries(D.works || {})) {
   const set = (p, d) => { if (d && d.parts && d.parts.length) p.deep = d; else delete p.deep; };
   (A.strengths || []).forEach((p, i) => set(p, pts[`S${i + 1}`]));
   (A.weaknesses || []).forEach((p, i) => set(p, pts[`W${i + 1}`]));
+  // 작품만의 특색(ID) · 반복 반응 묶음 한 줄 평(T#) · 불호 세 가지 한 줄(DG·DS·DF)
+  if (pts.ID && pts.ID.parts && pts.ID.parts.length) A.identity = pts.ID; else delete A.identity;
+  (o.themes || []).forEach((t, i) => { const x = pts[`T${i + 1}`]; if (x && x.line) t.line = x; else delete t.line; });
+  const DKEY = { goguma: "DG", stuffy: "DS", forced: "DF" };
+  (o.dislike || []).forEach((d) => { const x = pts[DKEY[d.k]]; if (x && x.line) d.line = x; else delete d.line; });
   if (A.readers) {
     const R = A.readers;
     R.deep = { RP: pts.RP || null, RW: (R.wants || []).map((_, i) => pts[`RW${i + 1}`] || null), RS: (R.splits || []).map((_, i) => pts[`RS${i + 1}`] || null), RC: pts.RC || null };

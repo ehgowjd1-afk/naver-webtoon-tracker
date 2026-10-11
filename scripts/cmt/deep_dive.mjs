@@ -17,7 +17,7 @@ import { createBatcher, costOf as rawCost } from "./batch.mjs";
 import { parseJson } from "./cmt_ai.mjs";
 
 const SONNET = { model: "claude-sonnet-5-5", effort: "medium" };
-const EST_WORK = 0.09;   // 작품 1개당 예상(시범 실측 0.062 + 독자 분석·근거 번호로 늘어난 몫)
+const EST_WORK = 0.11;   // 작품 1개당 예상(시범 실측 0.062 + 독자 분석·근거 번호로 늘어난 몫)
 const PER_EP = 12, MAX_EPS = 60, MIN_REFS = 2;
 const MOCK = !!process.env.CMT_MOCK;
 const STATE = "state/ai_state.json", OUT = "cmt_out";
@@ -37,11 +37,16 @@ const MONTH = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 7);
 const log = (...a) => console.log(...a);
 const clip = (t, n) => N.cut(String(t).trim().replace(/\s+/g, " "), n);
 const BUCKET = { like: "좋다는 말", talk: "많이 하는 말", dislike: "불호" };
+const DKEY = { goguma: "DG", stuffy: "DS", forced: "DF" };
+const DISLIKE_WORDS = /답답|고구마|억지|개연|캐붕|질질|어장|민폐|무책임|비호감|매력\s?(이\s?)?없|실망|이해\s?(가\s?)?안|감정선|노잼|지루|하차|진도|별로/;
 
 // ---- 요청 글 ----
 const SCHEMA = {
-  type: "object", additionalProperties: false, required: ["points"],
-  properties: { points: { type: "array", items: { type: "object", additionalProperties: false, required: ["key", "parts", "insight"],
+  type: "object", additionalProperties: false, required: ["points", "lines"],
+  properties: {
+    lines: { type: "array", items: { type: "object", additionalProperties: false, required: ["key", "line", "refs"],
+      properties: { key: { type: "string" }, line: { type: "string" }, refs: { type: "array", items: { type: "integer" } } } } },
+    points: { type: "array", items: { type: "object", additionalProperties: false, required: ["key", "parts", "insight"],
     properties: {
       key: { type: "string" },
       parts: { type: "array", items: { type: "object", additionalProperties: false, required: ["name", "detail", "react", "refs"],
@@ -51,9 +56,12 @@ const SCHEMA = {
 };
 const SYSTEM = `당신은 웹툰 기획 PD를 돕는 분석가입니다. 한 작품의 분석 항목(먹힌 요소 S·안 먹힌 요소 W·독자 분석 R)과, 핵심 회차의 제목·베스트 댓글을 받아 항목 하나하나를 구체적으로 쪼갭니다.
 
-가장 중요한 원칙: 지어내지 않습니다. 웹툰 그림은 볼 수 없으므로 '그 회차에 실제로 있었던 일'은 회차 제목과 그 회차 댓글들이 공통으로 묘사하는 장면에서만 가져옵니다. 독자 반응은 댓글이 실제로 말한 것만 씁니다. 모든 칸에 근거 댓글 번호(refs, 입력의 #번호)를 2~6개 답니다. 근거 댓글이 2개가 안 되는 내용은 쓰지 않습니다. 프로그램이 번호를 검사해 근거가 부족한 칸은 버립니다.
+가장 중요한 원칙 두 가지.
+1) 지어내지 않습니다. 웹툰 그림은 볼 수 없으므로 '그 회차에 실제로 있었던 일'은 회차 제목과 그 회차 댓글들이 공통으로 묘사하는 장면에서만 가져옵니다. 독자 반응은 댓글이 실제로 말한 것만 씁니다. 모든 칸에 근거 댓글 번호(refs, 입력의 #번호)를 2~6개 답니다. 근거 댓글이 2개가 안 되는 내용은 쓰지 않습니다. 프로그램이 번호를 검사해 근거가 부족한 칸은 버립니다.
+2) 어느 작품에나 붙는 말로 쓰지 않습니다. '잘생겼다', '몰입된다', '작화가 좋다', '답답하다'만으로는 안 됩니다. 이 작품의 인물 이름·장면·설정·상황을 넣어, 다른 작품에는 그대로 쓸 수 없는 문장으로 씁니다. 스스로 점검: 작품 이름과 인물 이름만 바꿔 넣어도 말이 되면 다시 씁니다.
 
-항목마다(key는 입력의 S1·W1·RP·RW1·RS1·RC 그대로) parts 2~5개와 insight를 씁니다.
+points: 항목마다(key는 입력의 ID·S1·W1·RP·RW1·RS1·RC 그대로) parts 2~5개와 insight를 씁니다.
+- ID 이 작품만의 특색: 이 작품에서 두드러지는 결을 댓글 근거로 구체적으로 — 인물 조합과 관계 구도, 되풀이되는 장면 공식, 톤(개그·진지·수위), 연출 습관, 독자들이 만든 놀이 문화(별명·밈·팬덤 구호). parts 3~5개, insight는 이 작품의 정체성을 2~3문장으로. (장르의 흔한 공식인지 이 작품만의 것인지는 여러 작품을 모아 따로 비교하므로, 여기서는 일반 상식으로 짐작해 단정하지 말고 이 작품에서 실제로 두드러진 것만 씁니다.)
 - 캐릭터 요소: 그 인물의 매력(또는 비호감)의 결 — 성격, 반복되는 행동 패턴, 상대에게 보이는 태도, 말투, 외모·비주얼이 연출되는 방식. 어떤 회차의 어떤 장면에서 드러났는지.
 - 서사 요소: 이야기가 바뀌는 단계를 순서대로 — 각 단계가 어느 회차 무렵 어떤 사건으로 관계·상황이 어떻게 바뀌었는지.
 - 구조·전개 요소: 떡밥을 깔고 회수하는 방식, 회차를 끊는 위치, 시점 전환, 속도 조절.
@@ -66,6 +74,8 @@ const SYSTEM = `당신은 웹툰 기획 PD를 돕는 분석가입니다. 한 작
 - RC 이탈 신호: 하차·실망을 말한 지점과 이유. 근거가 없으면 parts를 비웁니다.
 
 parts 한 칸 = name(짧은 이름, 15자 안팎), detail(그 회차에서 실제로 무슨 장면·행동·장치였는지, 또는 그 독자 무리가 무엇을 원하는지 1~2문장), react(독자가 어떻게 반응했는지 한 문장), refs(근거 댓글 번호 2~6개).
+lines: 입력의 [반복 반응 묶음] T1·T2…와 [불호] DG·DS·DF마다 한 줄(40~70자) — 이 작품에서 구체적으로 무엇이 그랬는지(어떤 인물의 어떤 모습·어느 회차 어떤 장면·어떤 전개). 예) '셔츠 차림 세레나를 보고 웃는 76화, 핏대 세우는 108화 질투 장면' 같은 결. refs 2~6개. 근거가 없는 묶음은 빼도 됩니다.
+
 insight = 기획자가 가져갈 점(안 먹힌 요소·이탈은 피할 점, 독자 항목은 이 독자를 붙잡는 방법) 한두 문장. 위 parts에서 나온 것만.
 
 규칙
@@ -80,6 +90,7 @@ function pickEpisodes(cm) {
   for (const p of [...(A.strengths || []), ...(A.weaknesses || [])]) for (const no of p.eps || []) set.add(no);
   for (const t of cm.themes) for (const [l] of t.e.slice(0, t.b === "talk" ? 2 : 3)) if (byLabel.has(l)) set.add(byLabel.get(l));
   for (const e of cm.eps) if (e.k) set.add(e.no);
+  for (const d of cm.dislike || []) for (const [l] of (d.e || []).slice(0, 2)) if (byLabel.has(l)) set.add(byLabel.get(l));
   return [...set].filter((no) => cm.eps.some((e) => e.no === no)).sort((a, b) => a - b).slice(0, MAX_EPS);
 }
 function readerItems(A) {
@@ -92,12 +103,14 @@ function readerItems(A) {
 }
 function requestText(cm, info, best, num) {
   const A = cm.analysis;
-  const lines = [`[작품] ${cm.title} / ${cm.genre || info.genre || "-"}${info.keywords.length ? " / " + info.keywords.slice(0, 8).join(", ") : ""}`, `[작품 소개] ${clip(info.desc || "-", 300)}`, "", "[분석 항목]"];
+  const lines = [`[작품] ${cm.title} / ${cm.genre || info.genre || "-"}${info.keywords.length ? " / " + info.keywords.slice(0, 8).join(", ") : ""}`, `[작품 소개] ${clip(info.desc || "-", 300)}`, "", "[분석 항목]", "ID 이 작품만의 특색(정체성)"];
   (A.strengths || []).forEach((p, i) => lines.push(`S${i + 1} 먹힌 요소 (${p.axis}) ${p.point} — 근거: ${p.why} · 근거 회차 ${(p.eps || []).join(",")}`));
   (A.weaknesses || []).forEach((p, i) => lines.push(`W${i + 1} 안 먹힌 요소 (${p.axis}) ${p.point} — 근거: ${p.why} · 근거 회차 ${(p.eps || []).join(",")}`));
   for (const [k, t] of readerItems(A)) lines.push(`${k} 독자 분석 ${t}`);
-  lines.push("", "[반복 반응 묶음] (종류) 이름: 개수 · 많이 나온 회차");
-  for (const t of cm.themes.slice(0, 24)) lines.push(`(${BUCKET[t.b]}) ${t.l}: ${t.n}개 · ${t.e.slice(0, 3).map(([l, n]) => `${l} ${n}`).join(", ")}`);
+  lines.push("", "[반복 반응 묶음] T번호 (종류) 이름: 개수 · 많이 나온 회차");
+  cm.themes.slice(0, 24).forEach((t, i) => lines.push(`T${i + 1} (${BUCKET[t.b]}) ${t.l}: ${t.n}개 · ${t.e.slice(0, 3).map(([l, n]) => `${l} ${n}`).join(", ")}`));
+  lines.push("", "[불호] (재확인 거친 것)");
+  for (const d of cm.dislike || []) if (d.n) lines.push(`${DKEY[d.k]} ${d.l}: ${d.n}개 · 몰린 회차 ${(d.e || []).slice(0, 3).map(([l, n]) => `${l} ${n}`).join(", ")}`);
   lines.push("", "[핵심 회차] == no 회차 제목 (댓글 수, 표시) ==  그 아래 베스트 댓글: #번호 [좋아요] 본문");
   for (const [no, cs] of best) {
     const e = cm.eps.find((x) => x.no === no) || {};
@@ -115,9 +128,10 @@ const report = { cost: { deep: 0 }, batches: {}, notes: [], tokens: {}, dropped:
 function charge(usd, label) { if (MOCK) return; state.spend[MONTH] = (state.spend[MONTH] || 0) + usd; mkdirSync("state", { recursive: true }); writeFileSync(STATE, JSON.stringify(state, null, 1) + "\n"); log(`  ${label} 비용 $${usd.toFixed(4)} → 이 달 합계 $${state.spend[MONTH].toFixed(2)}`); }
 const costOf = (m, u) => { const t = (report.tokens[m] ||= { in: 0, out: 0, calls: 0 }); t.in += u.input_tokens || 0; t.out += u.output_tokens || 0; t.calls++; return MOCK ? 0 : rawCost(m, u); };
 function mockAnswer(cid, body) {
-  const keys = [...body.matchAll(/^(S\d+|W\d+|RP|RW\d+|RS\d+|RC) /gm)].map((m) => m[1]);
+  const keys = [...body.matchAll(/^(ID|S\d+|W\d+|RP|RW\d+|RS\d+|RC) /gm)].map((m) => m[1]);
+  const lkeys = [...body.matchAll(/^(T\d+|DG|DS|DF) /gm)].map((m) => m[1]);
   const ns = [...body.matchAll(/^#(\d+) \[/gm)].map((m) => Number(m[1]));
-  return { points: keys.map((key, i) => ({ key, parts: [{ name: "가짜 항목", detail: "가짜 장면", react: "가짜 반응", refs: ns.slice(i, i + 3) }, { name: "근거 부족", detail: "버려져야 함", react: "-", refs: [ns[0]] }], insight: "가짜 배울 점" })) };
+  return { lines: lkeys.map((key, i) => ({ key, line: "가짜 한 줄 평", refs: ns.slice(i, i + 2) })), points: keys.map((key, i) => ({ key, parts: [{ name: "가짜 항목", detail: "가짜 장면", react: "가짜 반응", refs: ns.slice(i, i + 3) }, { name: "근거 부족", detail: "버려져야 함", react: "-", refs: [ns[0]] }], insight: "가짜 배울 점" })) };
 }
 const { stage } = createBatcher({ mock: MOCK, mockAnswer, waitMin: args.waitMin, tStart: T_START, charge, report, log });
 
@@ -132,6 +146,15 @@ try {
     const nos = pickEpisodes(cm), best = [];
     try {
       for (const no of nos) { const b = await N.fetchBest(id, no); best.push([no, b.comments.slice(0, PER_EP)]); }
+      // 불호가 몰린 회차는 공개 직후 댓글 중 불호 단어가 든 것도(베스트엔 불평이 잘 안 오름)
+      const byLabel = new Map(cm.eps.map((e) => [e.l, e.no]));
+      const dnos = new Set(); for (const d of cm.dislike || []) if (d.n) for (const [l] of (d.e || []).slice(0, 2)) if (byLabel.has(l)) dnos.add(byLabel.get(l));
+      for (const no of dnos) {
+        const row = best.find((x) => x[0] === no); if (!row) continue;
+        const r = await N.fetchEarly(id, no, 300);
+        const seen = new Set(row[1].map((c) => c.cid));
+        row[1].push(...r.comments.filter((c) => !seen.has(c.cid) && DISLIKE_WORDS.test(c.text)).sort((a, b) => b.like - a.like).slice(0, 10));
+      }
     } catch (e) { if (e instanceof N.NaverBlocked) throw e; report.notes.push(`수집 실패로 건너뜀: ${cm.title} (${e.message})`); continue; }
     const num = new Map();
     const text = requestText(cm, N.workInfo(id), best, num);
@@ -158,6 +181,14 @@ try {
       for (const c of w.num.values()) { const t = norm(c.text); for (let i = 0; i + 12 <= t.length; i++) grams.add(t.slice(i, i + 12)); }
       const sc = (s) => { const t = norm(s); for (let i = 0; i + 12 <= t.length; i++) if (grams.has(t.slice(i, i + 12))) return "(댓글 원문과 겹쳐 가림)"; return s; };
       out[w.id] = {};
+      const LK = /^(T\d+|DG|DS|DF)$/;
+      for (const x of p.lines || []) {
+        if (!LK.test(x.key)) continue;
+        const refs = [...new Set((x.refs || []).filter((n) => w.num.has(n)))];
+        if (refs.length < MIN_REFS) { report.dropped++; continue; }
+        out[w.id][x.key] = { line: sc(x.line), n: refs.length, lk: refs.reduce((t, n) => t + w.num.get(n).like, 0) };
+        report.kept++;
+      }
       for (const pt of p.points || []) {
         const parts = [];
         for (const x of pt.parts || []) {
