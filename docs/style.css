@@ -245,3 +245,75 @@ footer a:hover{text-decoration:underline}
 .mrevsvg{display:block; width:100%; height:64px; margin-top:3px; overflow:visible}
 .mrevempty{font-size:12.5px; color:var(--muted); line-height:1.55; margin-top:6px}
 .mrev .mepbtn{margin-top:13px}
+/* 작품 상세 — 회차별 댓글 수 + AI 댓글 분석 (cmt.js) */
+.modal-card.wide{max-width:600px}
+.cbox{margin-top:14px}
+.cstat{font-size:12px; color:var(--muted); margin-top:6px}
+.cstat b{color:var(--ink); font-weight:600}
+.cchart-wrap{position:relative; margin-top:10px}
+.cymax{position:absolute; top:-2px; left:0; font-size:10.5px; color:var(--faint); pointer-events:none}
+.cscroll{overflow-x:auto; overflow-y:hidden; padding-top:14px; scrollbar-width:thin}
+.cbars{display:flex; align-items:flex-end; gap:1px; height:118px; border-bottom:1px solid var(--border-strong); background:linear-gradient(var(--border) 1px, transparent 1px) 0 50%/100% 50% no-repeat}
+.cbar{flex:1 1 0; min-width:2px; border:0; padding:0; margin:0; background:var(--accent); opacity:.55; border-radius:2px 2px 0 0; cursor:pointer; transition:opacity .1s}
+.cbar:hover{opacity:.9}
+.cbar.k-up{background:var(--up); opacity:.85}
+.cbar.k-down{background:var(--down); opacity:.85}
+.cbar.sel{opacity:1; outline:2px solid var(--ink); outline-offset:0}
+.cbar:focus-visible{outline:2px solid var(--ink)}
+.cxax{display:flex; justify-content:space-between; gap:8px; font-size:10.5px; color:var(--faint); margin-top:4px}
+.cxax span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40%}
+.cleg{display:flex; align-items:center; gap:4px; max-width:none !important}
+.cleg i{width:8px; height:8px; border-radius:2px; display:inline-block; margin-left:6px}
+.cleg i.k-up{background:var(--up)} .cleg i.k-down{background:var(--down)}
+.chint{font-size:11.5px; color:var(--muted); margin-top:6px; min-height:17px}
+.cep{margin-top:10px; padding:11px 12px; border-radius:10px; background:var(--surface-2)}
+.ceph{display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap}
+.ceph b{font-size:14px} .ceph span{font-size:12px; color:var(--muted)}
+.cchips{display:flex; flex-wrap:wrap; gap:5px; margin-top:7px}
+.cchip{font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; background:var(--surface); color:var(--muted); border:1px solid var(--border)}
+.cchip.k-up,.cchip.m-hot{color:var(--up); background:var(--up-soft); border-color:transparent}
+.cchip.k-down,.cchip.m-cold{color:var(--down); background:var(--down-soft); border-color:transparent}
+.cchip.m-good{color:var(--accent-ink); background:var(--accent-soft); border-color:transparent}
+.cchip.m-mixed{color:var(--gold); border-color:var(--gold)}
+.cchip.c-ext{color:var(--faint)}
+.crow{display:flex; gap:10px; margin-top:8px; font-size:13px; line-height:1.55}
+.ck{flex:none; width:74px; color:var(--faint); font-weight:600; font-size:12px; padding-top:1px}
+.cv{min-width:0; color:var(--ink)}
+.ctag{display:inline-block; font-size:11.5px; padding:2px 8px; border-radius:20px; margin:0 4px 4px 0; background:var(--surface); border:1px solid var(--border); color:var(--ink)}
+.ctag b{font-variant-numeric:tabular-nums; margin-left:2px}
+.ctag.b-like{background:var(--accent-soft); border-color:transparent; color:var(--accent-ink)}
+.ctag.b-dis{background:var(--up-soft); border-color:transparent; color:var(--up)}
+.ctone{display:flex; height:7px; border-radius:4px; overflow:hidden; margin-top:10px; gap:1px}
+.ctone i,.ctoneleg i{display:block}
+.ctoneleg{display:flex; flex-wrap:wrap; gap:4px 10px; font-size:11px; color:var(--muted); margin-top:5px}
+.ctoneleg span{display:flex; align-items:center; gap:4px}
+.ctoneleg i{width:8px; height:8px; border-radius:2px}
+.t-praise{background:var(--accent)} .t-char{background:var(--gold)} .t-theory{background:var(--down)} .t-critic{background:var(--up)} .t-other{background:var(--same)}
+.cmuted{font-size:12px; color:var(--faint); margin-top:6px}
+.cday{margin-top:14px; padding-top:12px; border-top:1px solid var(--border)}
+.cdayhd{display:flex; justify-content:space-between; font-size:12px; color:var(--muted); font-weight:600}
+.cdayhd b{color:var(--ink)}
+.cdaybars{display:flex; align-items:flex-end; gap:2px; height:40px; margin-top:6px}
+.cdaybars i{flex:1 1 0; background:var(--accent); opacity:.6; border-radius:2px 2px 0 0}
+.cday-note{margin-top:12px; padding-top:10px; border-top:1px solid var(--border); font-size:12px; color:var(--muted)}
+.csec{margin-top:14px; padding-top:12px; border-top:1px solid var(--border)}
+.csec summary{cursor:pointer; font-size:13.5px; font-weight:700; color:var(--ink); list-style-position:inside}
+.csum{font-size:13.5px; line-height:1.6; margin:9px 0 0; color:var(--ink)}
+.csub{font-size:11.5px; color:var(--faint); font-weight:600; margin-top:12px; letter-spacing:.02em}
+.cpt{margin-top:7px; padding:9px 11px; border-radius:9px; background:var(--surface-2); border-left:3px solid var(--border-strong)}
+.cpt.p-good{border-left-color:var(--accent)} .cpt.p-bad{border-left-color:var(--up)}
+.cpth{display:flex; gap:7px; align-items:baseline; font-size:13px}
+.caxis{flex:none; font-size:10.5px; font-weight:700; color:var(--muted); background:var(--surface); border:1px solid var(--border); padding:0 6px; border-radius:6px}
+.cptw{font-size:12px; color:var(--muted); margin-top:3px; line-height:1.5}
+.celinks{display:flex; flex-wrap:wrap; gap:4px; margin-top:5px}
+.celink{font:inherit; font-size:11px; font-weight:600; color:var(--accent); background:transparent; border:1px solid var(--accent); border-radius:6px; padding:1px 6px; cursor:pointer; white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis}
+.celink:hover{background:var(--accent); color:var(--on-accent)}
+.cturn{display:flex; gap:9px; align-items:flex-start; margin-top:7px; font-size:12.5px}
+.cturn > div{display:flex; flex-direction:column; min-width:0}
+.cturn span{color:var(--muted); font-size:12px}
+.clist{margin:0; padding-left:16px}
+.clist li{margin-bottom:3px}
+.cth{padding:6px 0; border-bottom:1px dashed var(--border)}
+.cthh{display:flex; justify-content:space-between; gap:10px; font-size:13px}
+.cthe{font-size:11.5px; color:var(--faint); margin-top:1px}
+.cfoot{font-size:11px; color:var(--faint); margin-top:14px; line-height:1.5}

@@ -642,6 +642,7 @@ function crossBasisHtml(d, isSeries){
   return `<div class="xbasis"><div class="xhead">기준별 순위 · 추이</div>${rows}</div>`;
 }
 function openModal(d){
+  document.querySelector(".modal-card").classList.remove("wide");   // 댓글 분석 있는 작품만 넓게(cmt.js가 다시 켬)
   const url=urlFor(d), caps=SOURCES[src].caps;
   const badges=badgeHtml(d)+(caps.move?`<span class="badge ${d.m>0?"b-new":d.m<0?"b-rest":"b-fin"}">${d.m>0?"▲"+d.m:d.m<0?"▼"+Math.abs(d.m):"변동없음"}</span>`:"");
   const ctx=`${esc(SOURCES[src].label)}${variant?" · "+esc(varLabel()):""} · ${esc(subLabel(sub))} · <b>${d.r}위</b>`;
@@ -661,6 +662,7 @@ function openModal(d){
     <div id="mrev" class="mrev" hidden></div>
     <div id="mdl" class="mrev" hidden></div>
     <div id="mfav" class="mrev" hidden></div>
+    ${webtoon?'<div id="mcmt" hidden></div>':""}
     <div id="mcross"></div>
     <button class="mepbtn" data-trend="1" data-id="${d.id}" data-name="${esc(d.name)}">⬇ 순위 추이 엑셀 (기준별 시트)</button>
     ${webtoon?`<button class="mepbtn" data-id="${d.id}" data-name="${esc(d.name)}">⬇ 회차별 댓글·별점 엑셀(CSV)</button>`:""}
@@ -687,9 +689,12 @@ function openModal(d){
   }); }
   // 관심수 추이 (웹툰만)
   if(webtoon){ ensureFavHist().then(()=>{ if(modalSeq!==myTok) return; const fb=document.getElementById("mfav"); if(fb){ const h=favChartHtml(d.id); fb.innerHTML=h; fb.hidden=!h; } }); }
+  // 회차별 댓글 수 막대(전 웹툰, 매일) + AI 댓글 분석(분석된 작품만) — cmt.js
+  if(webtoon && window.CMT) CMT.render(document.getElementById("mcmt"), d.id, d.name, ()=>modalSeq===myTok);
 }
 /* 키워드 클릭 → 그 키워드 작품 전부 */
 function openKeywordList(kw){
+  document.querySelector(".modal-card").classList.remove("wide");
   const ids=(KWINDEX&&KWINDEX[kw])||[];
   const items=ids.map(id=>({id, info:LOOKUP.id[id]})).filter(x=>x.info)
     .sort((a,b)=>((DETAILS[b.id]||{}).fav||0)-((DETAILS[a.id]||{}).fav||0));
@@ -705,6 +710,7 @@ function openKeywordList(kw){
 }
 /* 검색결과 → 작품 상세 모달 (현재 화면과 무관, 자립형) */
 function openWorkModal(w){
+  document.querySelector(".modal-card").classList.remove("wide");
   const isWt = w.kind==="webtoon";
   const url = isWt ? `https://comic.naver.com/webtoon/list?titleId=${w.id}` : `https://series.naver.com/${w.kind}/detail.series?productNo=${w.id}`;
   const label = isWt ? "네이버웹툰" : ("시리즈 "+(w.kind==="comic"?"웹툰":"웹소설"));
@@ -721,6 +727,7 @@ function openWorkModal(w){
     <div id="mrev" class="mrev" hidden></div>
     <div id="mdl" class="mrev" hidden></div>
     <div id="mfav" class="mrev" hidden></div>
+    ${isWt?'<div id="mcmt" hidden></div>':""}
     <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
   document.getElementById("modal").hidden=false;
   const myTok=++modalSeq;
@@ -736,6 +743,7 @@ function openWorkModal(w){
     const dlb=document.getElementById("mdl"); if(dlb){ const dh=dlChartHtml(w.name, isWt?0:w.id); dlb.innerHTML=dh; dlb.hidden=!dh; }
   });
   if(isWt){ ensureFavHist().then(()=>{ if(modalSeq!==myTok) return; const fb=document.getElementById("mfav"); if(fb){ const h=favChartHtml(w.id); fb.innerHTML=h; fb.hidden=!h; } }); }
+  if(isWt && window.CMT) CMT.render(document.getElementById("mcmt"), w.id, w.name, ()=>modalSeq===myTok);
 }
 /* 전체 작품 검색: 웹툰(LOOKUP) + 시리즈(SERIES) 통합 인덱스 */
 let GINDEX=null;

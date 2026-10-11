@@ -2,9 +2,9 @@ name: 회차 댓글 분석
 
 # scripts/cmt/cmt_pilot.mjs 를 손으로만 돌립니다 (자동 실행 없음). 매일 자동 수집(collect)과 완전히 따로 돌고, 실패해도 영향 없음.
 # 작품마다 전 회차 베스트 댓글 + 댓글 수가 튄 회차의 공개 직후 댓글을 로그인 없이 모아(닉네임·아이디는 버림, 요청 간격 2초),
-# AI로 반복 반응 묶음 찾기(Sonnet) → 댓글마다 표시(Haiku) → 불호 재확인(Sonnet) → 참고용 니즈 맵(Sonnet)을 만듭니다. (리디 트래커 2판과 같은 방식)
+# AI로 반복 반응 묶음 찾기(Sonnet) → 댓글마다 표시 + 회차 요약(Haiku) → 불호 재확인(Sonnet) → 작품·독자 분석(Sonnet)을 만듭니다. (리디 트래커 2판과 같은 방식)
 # 결과: 원문 없는 숫자·표시(result.json) + 원문 포함 잠긴 파일(full.enc.json, 사용자 컴퓨터에서만 열림)을 하루만 보관하는 결과물로.
-# 저장소에는 이 달 AI 사용액(state/ai_state.json)만 커밋합니다. 일괄은 보내는 즉시 예상 비용을 먼저 기록하고 끝나면 실제 금액으로 맞춥니다.
+# 저장소에는 사이트용 결과(docs/data/cmt — 원문 없음)와 이 달 AI 사용액(state/ai_state.json)을 커밋합니다. 일괄은 보내는 즉시 예상 비용을 먼저 기록하고 끝나면 실제 금액으로 맞춥니다.
 # 작품이 많으면: ids 에 전부 넣고 chunk 개씩 나눠 돕니다. 이번 실행이 앞 chunk 개를 하고, 성공하면 나머지로 이 워크플로를 다시 부릅니다(한 번에 하나씩).
 
 on:
@@ -82,15 +82,17 @@ jobs:
           path: cmt_out/
           retention-days: 1
           if-no-files-found: ignore
-      - name: 이 달 AI 사용액 커밋
+      # 사이트용(원문 없음: 숫자·묶음 이름·AI 요약)으로 내보내서 docs/data/cmt 에 합침 → 사이트 작품 상세에 바로 보임
+      - name: 사이트 반영 + 이 달 AI 사용액 커밋
         if: always()
         run: |
-          [ -f state/ai_state.json ] || exit 0
+          node scripts/cmt/export_site.mjs cmt_out/result.json docs/data/cmt || echo "사이트 내보내기 실패(사용액만 커밋)"
           git config user.name "ehgowjd1-afk"
           git config user.email "ehgowjd1@gmail.com"
-          git add state/ai_state.json
+          [ -f state/ai_state.json ] && git add state/ai_state.json
+          [ -d docs/data/cmt ] && git add docs/data/cmt
           git diff --cached --quiet && exit 0
-          git commit -m "chore: AI 사용액 기록 (댓글 분석)"
+          git commit -m "data: 댓글 분석 사이트 반영 + AI 사용액"
           for i in 1 2 3; do git pull --rebase --autostash -X theirs && git push && exit 0 || (git rebase --abort 2>/dev/null; sleep 5); done
           exit 1
       # 이번 몫이 성공했을 때만 남은 작품으로 다시 부름(실패·한도 초과면 멈춤)
