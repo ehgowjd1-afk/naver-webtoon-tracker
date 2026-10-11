@@ -417,11 +417,12 @@ async function collectComments(details){
 /* 회차별 댓글수·별점 전수 수집(백필): 하루 N작품씩 회전. article/list(별점·날짜) + wcc(댓글수).
    episodes/{titleId}.json = {id,name,updated,eps:[{no,sub,star,cmt,date,charge}]} (최근 최대 600화) */
 async function collectEpisodes(details, updated){
-  const EP_TITLES_PER_RUN = 120, EP_MAXPAGES = 30; // 최근 600화
+  const EP_TITLES_PER_RUN = 150, EP_MAXPAGES = 30; // 최근 600화
   const EPDIR = path.join(OUT, "episodes");
   fs.mkdirSync(EPDIR, { recursive:true });
   let idx = {}; try { idx = JSON.parse(fs.readFileSync(path.join(OUT,"episodes_index.json"),"utf8")); } catch(e){}
-  const ids = Object.keys(details).filter(id => details[id].ep > 0).map(Number);
+  // 성인작은 목록이 로그인 필요(401)라 제외 — 예전엔 늘 실패해 '안 된 것 먼저' 맨 앞을 차지하며 하루 몫을 다 써서 다른 작품이 한 달 넘게 갱신 안 됐음(2026-10-11). 성인작 댓글 수는 collectEpCounts가 매일 셈
+  const ids = Object.keys(details).filter(id => details[id].ep > 0 && !details[id].adult).map(Number);
   ids.sort((a,b) => ((idx[a]&&idx[a].u)||0) - ((idx[b]&&idx[b].u)||0)); // 안 된/오래된 것 먼저
   const todo = ids.slice(0, EP_TITLES_PER_RUN);
   for(const id of todo){
@@ -444,10 +445,11 @@ async function collectEpisodes(details, updated){
         }catch(e){}
         await sleep(90);
       }
-      eps.sort((a,b)=>a.no-b.no);
-      fs.writeFileSync(path.join(EPDIR, id+".json"), JSON.stringify({ id, name:(idL[id]&&idL[id][0])||"", updated, eps }));
-      idx[id] = { u: Date.now(), n: eps.length };
-    }catch(e){ console.error("episodes", id, e.message); }
+      const uniq = [...new Map(eps.map(e=>[e.no,e])).values()];   // 마지막 쪽이 범위를 넘으면 같은 회차가 다시 와서 중복됐음
+      uniq.sort((a,b)=>a.no-b.no);
+      fs.writeFileSync(path.join(EPDIR, id+".json"), JSON.stringify({ id, name:(idL[id]&&idL[id][0])||"", updated, eps:uniq }));
+      idx[id] = { u: Date.now(), n: uniq.length };
+    }catch(e){ console.error("episodes", id, e.message); idx[id] = { u: Date.now(), n: (idx[id]&&idx[id].n)||0, err: 1 }; }   // 실패해도 순번은 넘김(다음 회전 때 다시)
   }
   fs.writeFileSync(path.join(OUT,"episodes_index.json"), JSON.stringify(idx));
   console.log("episodes:", todo.length, "작품 처리 · 누적", Object.keys(idx).length, "/", ids.length);
@@ -561,6 +563,72 @@ function updateFavHistory(dir, date, details){
   return { dates:fh.dates.length, works:Object.keys(fh.works).length };
 }
 
+/* 회차별 댓글 수 매일 갱신 — 전 작품(성인 포함: 댓글 수 API는 로그인 불필요). 네이버 화면의 '댓글 N'(답글 포함, activePostCount).
+   최근 50칸은 매일(끝 칸에도 댓글이 있으면 50칸 더), 그 앞 회차는 처음 한 번 + 작품마다 7일에 한 번(번호로 요일 분산).
+   ep_counts/{titleId%16}.json = {date, works:{id:{s:첫 번호, c:[번호 s부터 댓글 수(0=결번·미공개)], at:갱신일, full:앞 회차까지 셈}}}
+   cmt_history.json = 작품별 전체 댓글 수의 날짜별 누적({dates, works:{id:{v:[]}}}, 최근 150일, 오늘 센 작품만 기록 — 베껴 쓰기 금지) */
+const EPC_SHARDS = 16;
+async function epCountBatch(id, nos){
+  const qs = nos.map(no=>"pageIds=webtoon_"+id+"_"+no).join("&");
+  const r = await fetch(`https://comic.naver.com/comment/api/community/v1/pages/activity/count/?${qs}`, { headers:{ "User-Agent":UA_PC, "Service-Ticket-Id":"comic_webtoon", "Referer":"https://comic.naver.com/" } });
+  if(!r.ok) throw new Error("count "+r.status);
+  const d = await r.json(), out = {};
+  for(const c of ((d.result&&d.result.countList)||[])){ const m = String(c.pageId).match(/_(\d+)$/); if(m) out[+m[1]] = c.activePostCount||0; }
+  return out;
+}
+async function collectEpCounts(details, date, dir){
+  dir = dir || OUT;
+  const DIR = path.join(dir, "ep_counts"); fs.mkdirSync(DIR, { recursive:true });
+  const shards = [];
+  for(let k=0;k<EPC_SHARDS;k++){ try{ shards[k]=JSON.parse(fs.readFileSync(path.join(DIR,k+".json"),"utf8")); }catch(e){ shards[k]={}; } if(!shards[k].works) shards[k].works={}; }
+  const day = Math.floor(Date.parse(date)/864e5);
+  const totals = {}; let ok=0, fail=0, calls=0, fails=0;
+  for(const sid of Object.keys(details)){
+    const det = details[sid], id = +sid;
+    const base = Math.max(det.ep||0, det.adult ? (det.cmtNo||0) : 0) + (det.epGap||0);
+    if(!base) continue;
+    const sh = shards[id % EPC_SHARDS], prev = sh.works[sid];
+    const prevMax = prev ? prev.s + prev.c.length - 1 : 0, top = Math.max(base, prevMax) + 10;
+    const cnt = {};
+    if(prev) prev.c.forEach((v,i)=>{ cnt[prev.s+i] = v; });
+    try{
+      let lo = Math.max(1, top-49), hi = top;
+      for(let g=0; g<6; g++){
+        const nos=[]; for(let no=lo; no<=hi; no++) nos.push(no);
+        const got = await epCountBatch(id, nos); calls++; await sleep(100);
+        for(const no of nos) cnt[no] = got[no]||0;
+        if((got[hi]||0) > 0){ lo = hi+1; hi += 50; } else break;
+      }
+      const recentLo = Math.max(1, top-49);
+      let full = !!(prev && prev.full);
+      if(recentLo > 1 && (!full || (id + day) % 7 === 0)){
+        for(let a=1; a<recentLo; a+=50){ const nos=[]; for(let no=a; no<Math.min(recentLo, a+50); no++) nos.push(no); const got = await epCountBatch(id, nos); calls++; await sleep(100); for(const no of nos) cnt[no] = got[no]||0; }
+      }
+      full = true;
+      const pos = Object.keys(cnt).map(Number).filter(no=>cnt[no]>0);
+      if(!pos.length){ continue; }
+      const s0 = Math.min(...pos), e0 = Math.max(...pos), c = [];
+      for(let no=s0; no<=e0; no++) c.push(cnt[no]||0);
+      sh.works[sid] = { s:s0, c, at:date, full };
+      totals[sid] = c.reduce((t,v)=>t+v, 0); ok++; fails=0;
+    }catch(e){ fail++; if(++fails>=20){ console.error("ep counts: 20번 연속 실패 — 중단", e.message); break; } }
+  }
+  for(let k=0;k<EPC_SHARDS;k++){ shards[k].date = date; fs.writeFileSync(path.join(DIR,k+".json"), JSON.stringify(shards[k])); }
+  const h = updateCmtHistory(dir, date, totals);
+  return { ok, fail, calls, history: h };
+}
+function updateCmtHistory(dir, date, totals){
+  const fp = path.join(dir,"cmt_history.json");
+  const h = readHistory(fp);   // 깨져 있으면 예외 → 덮어쓰지 않음
+  if(!h.dates.includes(date)) h.dates.push(date);
+  const di = h.dates.indexOf(date);
+  for(const id in totals){ const w=h.works[id]||(h.works[id]={v:[]}); while(w.v.length<di) w.v.push(null); w.v[di]=totals[id]; }
+  for(const id in h.works){ const w=h.works[id]; while(w.v.length<=di) w.v.push(null); }
+  const RMAX=150; if(h.dates.length>RMAX){ const cut=h.dates.length-RMAX; h.dates.splice(0,cut); for(const id in h.works) h.works[id].v.splice(0,cut); }
+  fs.writeFileSync(fp, JSON.stringify(h));
+  return { dates:h.dates.length, works:Object.keys(h.works).length };
+}
+
 // 재수집 병합: 빈값이면 기존 유지(로그아웃이 19금/검색작 dl 안 지움)
 function mergeDetail(old, pd, kind){ old=old||{}; const m={ g:pd.g||old.g||"", k:(pd.k&&pd.k.length)?pd.k:(old.k||[]), dl:pd.dl||old.dl||"", star:pd.star||old.star||"", cmt:pd.cmt||old.cmt||"", ep:pd.ep||old.ep||0, status:pd.status||old.status||"", syn:pd.syn||old.syn||"", kind:kind||pd.kind||old.kind };
   const rent=(pd.rent!=null)?pd.rent:old.rent; if(rent!=null) m.rent=rent;   // 단가(대여/소장 쿠키) 보존 — 재수집 때 지우지 않음
@@ -573,7 +641,7 @@ function parseSeriesSearch(html){
   let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
   return out;
 }
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, episodeSplit, fillMissingTitles, pickSeriesHit, bestSeriesLink, refreshSeriesLinks, epFits, adultEp, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, episodeSplit, fillMissingTitles, pickSeriesHit, bestSeriesLink, refreshSeriesLinks, epFits, adultEp, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices, collectEpCounts, updateCmtHistory };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();   // 랭킹·요일·장르 기록 날짜(기존 그대로)
   const hdate=runDate();   // 다운수·관심수·무료유료 히스토리 날짜(새벽 4시 전 실행이면 전날) — 수집 스탬프와 같은 값
@@ -623,6 +691,7 @@ if (require.main === module) (async ()=>{
   fs.writeFileSync(path.join(OUT,"history.json"), JSON.stringify(hist));
 
   try { await collectEpisodes(details, updated); } catch(e){ console.error("episodes failed:", e.message); } // best-effort 백필
+  try { const ec = await collectEpCounts(details, hdate); console.log("ep counts(회차별 댓글 수):", JSON.stringify(ec)); } catch(e){ console.error("ep counts failed:", e.message); }   // 매일 전 작품 회차별 댓글 수 + 누적
 
   const c=o=>Object.fromEntries(Object.entries(o).map(([k,v])=>[k,v.length]));
   const sc=s=>{let n=0,items=0;for(const pf of["web","mobile"])for(const cat in s[pf])for(const p in s[pf][cat]){n++;items+=s[pf][cat][p].length;}return{rankings:n,items};};
