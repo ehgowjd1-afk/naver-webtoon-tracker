@@ -1,4 +1,7 @@
-/* deep_dive.mjs 결과(cmt_out/deep.json) → 사이트 파일 docs/data/cmt/{id}.json 의 analysis.strengths[i].deep / weaknesses[i].deep
+/* deep_dive.mjs 결과(cmt_out/deep.json) → 사이트 파일 docs/data/cmt/{id}.json
+ *   먹힌·안 먹힌 요소: analysis.strengths[i].deep / weaknesses[i].deep
+ *   독자 분석: analysis.readers.deep = { RP, RW:[…], RS:[…], RC }
+ *   이번 결과가 있는 작품은 예전 '자세히'를 지우고 새로 붙임(근거 부족으로 버린 칸이 예전 값으로 남지 않게)
  *   node scripts/cmt/apply_deep.mjs [cmt_out/deep.json] [docs/data/cmt]
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
@@ -11,10 +14,15 @@ for (const [id, pts] of Object.entries(D.works || {})) {
   const f = `${DIR}/${id}.json`;
   if (!existsSync(f)) continue;
   const o = JSON.parse(readFileSync(f, "utf8"));
-  if (!o.analysis) continue;
-  (o.analysis.strengths || []).forEach((p, i) => { const d = pts[`S${i + 1}`]; if (d && d.parts && d.parts.length) p.deep = d; });
-  (o.analysis.weaknesses || []).forEach((p, i) => { const d = pts[`W${i + 1}`]; if (d && d.parts && d.parts.length) p.deep = d; });
+  const A = o.analysis; if (!A) continue;
+  const set = (p, d) => { if (d && d.parts && d.parts.length) p.deep = d; else delete p.deep; };
+  (A.strengths || []).forEach((p, i) => set(p, pts[`S${i + 1}`]));
+  (A.weaknesses || []).forEach((p, i) => set(p, pts[`W${i + 1}`]));
+  if (A.readers) {
+    const R = A.readers;
+    R.deep = { RP: pts.RP || null, RW: (R.wants || []).map((_, i) => pts[`RW${i + 1}`] || null), RS: (R.splits || []).map((_, i) => pts[`RS${i + 1}`] || null), RC: pts.RC || null };
+  }
   writeFileSync(f, JSON.stringify(o));
   n++;
 }
-console.log(`요소 자세히 ${n}작품 사이트 파일에 붙임`);
+console.log(`자세히 ${n}작품 사이트 파일에 붙임`);

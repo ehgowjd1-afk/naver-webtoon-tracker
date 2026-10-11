@@ -340,3 +340,7 @@ footer a:hover{text-decoration:underline}
 .cins{margin-top:9px; font-size:12.5px; line-height:1.5; padding:7px 9px; border-radius:7px; background:var(--surface); border:1px solid var(--border)}
 .cins b{color:var(--accent-ink); margin-right:4px}
 .cpt.p-bad .cins b{color:var(--up)}
+.cref{font-size:11px; color:var(--faint); margin-top:2px; font-variant-numeric:tabular-nums}
+.cpt.p-reader{border-left-color:var(--down)}
+.cpt.p-reader .cdeep summary{color:var(--down)}
+.cpt.p-reader .cins b{color:var(--down)}

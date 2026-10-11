@@ -88,8 +88,10 @@
       if(A.summary) h += `<p class="csum">${esc(A.summary)}</p>`;
       // 요소 자세히(deep_dive.mjs): 어떤 매력·어떤 단계·어떤 연출인지 쪼갠 것 + 가져갈 점/피할 점
       const DEEPQ = { "캐릭터": "어떤 매력인지", "서사": "어떤 단계로 바뀌는지", "구조·전개": "어떤 구성인지", "작화·연출": "어떤 연출인지", "설정·세계관": "어떤 설정인지" };
-      const deepHtml = (p, bad) => !(p.deep && p.deep.parts && p.deep.parts.length) ? "" :
-        `<details class="cdeep" open><summary>${bad ? "무엇이 문제였는지" : (DEEPQ[p.axis] || "자세히")} — ${p.deep.parts.length}가지</summary><ol class="cparts">${p.deep.parts.map(x => `<li><b>${esc(x.name)}</b><div class="cpd">${esc(x.detail)}</div><div class="cpr">${esc(x.react)}</div>${x.eps && x.eps.length ? `<div class="celinks">${epLinks(x.eps, eps)}</div>` : ""}</li>`).join("")}</ol>${p.deep.insight ? `<div class="cins"><b>${bad ? "피할 점" : "가져갈 점"}</b> ${esc(p.deep.insight)}</div>` : ""}</details>`;
+      // 칸마다 근거 댓글 수·좋아요 합(deep_dive가 근거 2개 미만은 버림) — AI가 지어낸 게 아니라 댓글로 뒷받침된 것만
+      const deepBlock = (d, title, insLabel) => !(d && d.parts && d.parts.length) ? "" :
+        `<details class="cdeep" open><summary>${esc(title)} — ${d.parts.length}가지</summary><ol class="cparts">${d.parts.map(x => `<li><b>${esc(x.name)}</b><div class="cpd">${esc(x.detail)}</div><div class="cpr">${esc(x.react)}</div>${x.n ? `<div class="cref">근거 댓글 ${x.n}개 · 좋아요 ${man(x.lk)}</div>` : ""}${x.eps && x.eps.length ? `<div class="celinks">${epLinks(x.eps, eps)}</div>` : ""}</li>`).join("")}</ol>${d.insight ? `<div class="cins"><b>${esc(insLabel)}</b> ${esc(d.insight)}</div>` : ""}</details>`;
+      const deepHtml = (p, bad) => deepBlock(p.deep, bad ? "무엇이 문제였는지" : (DEEPQ[p.axis] || "자세히"), bad ? "피할 점" : "가져갈 점");
       const pts = (arr, cls, mark) => (arr || []).map(p => `<div class="cpt ${cls}"><div class="cpth"><span class="caxis">${esc(p.axis)}</span><b>${mark} ${esc(p.point)}</b></div><div class="cptw">${esc(p.why)}</div>${p.eps && p.eps.length ? `<div class="celinks">${epLinks(p.eps, eps)}</div>` : ""}${deepHtml(p, cls === "p-bad")}</div>`).join("");
       if((A.strengths || []).length) h += `<div class="csub">먹힌 요소</div>` + pts(A.strengths, "p-good", "＋");
       if((A.weaknesses || []).length) h += `<div class="csub">안 먹힌 요소</div>` + pts(A.weaknesses, "p-bad", "－");
@@ -98,10 +100,20 @@
       const R = A.readers;
       if(R){
         h += `<details class="csec" open><summary>👥 독자 분석</summary>`;
-        if(R.who) h += `<div class="crow"><span class="ck">독자층</span><span class="cv">${esc(R.who)}</span></div>`;
-        if((R.wants || []).length) h += `<div class="crow"><span class="ck">바라는 것</span><span class="cv"><ul class="clist">${R.wants.map(x => `<li><b>${esc(x.want)}</b> — ${esc(x.why)}</li>`).join("")}</ul></span></div>`;
-        if((R.splits || []).length) h += `<div class="crow"><span class="ck">갈리는 지점</span><span class="cv"><ul class="clist">${R.splits.map(x => `<li><b>${esc(x.topic)}</b> — ${esc(x.sides)}</li>`).join("")}</ul></span></div>`;
-        if(R.churn) h += `<div class="crow"><span class="ck">이탈 신호</span><span class="cv">${esc(R.churn)}</span></div>`;
+        const RD = R.deep || {};
+        if(RD.RP || (RD.RW || []).some(Boolean) || (RD.RS || []).some(Boolean) || RD.RC){
+          // 독자 분석 자세히(deep_dive.mjs): 항목마다 카드 + 근거 댓글로 뒷받침된 칸
+          const card = (head, sub, d, title, ins) => `<div class="cpt p-reader"><div class="cpth"><b>${esc(head)}</b></div>${sub ? `<div class="cptw">${esc(sub)}</div>` : ""}${deepBlock(d, title, ins)}</div>`;
+          if(R.who) h += `<div class="csub">독자층</div>` + card(R.who, "", RD.RP, "어떤 독자들인지", "이 독자를 붙잡으려면");
+          if((R.wants || []).length) h += `<div class="csub">바라는 것</div>` + R.wants.map((x, i) => card(x.want, x.why, (RD.RW || [])[i], "구체적으로 무엇을 바라는지", "이 바람을 다루려면")).join("");
+          if((R.splits || []).length) h += `<div class="csub">갈리는 지점</div>` + R.splits.map((x, i) => card(x.topic, x.sides, (RD.RS || [])[i], "양쪽이 무엇을 말하는지", "이 갈림을 다루려면")).join("");
+          if(R.churn) h += `<div class="csub">이탈 신호</div>` + card(R.churn, "", RD.RC, "어디서 왜 떠나려 했는지", "피할 점");
+        } else {
+          if(R.who) h += `<div class="crow"><span class="ck">독자층</span><span class="cv">${esc(R.who)}</span></div>`;
+          if((R.wants || []).length) h += `<div class="crow"><span class="ck">바라는 것</span><span class="cv"><ul class="clist">${R.wants.map(x => `<li><b>${esc(x.want)}</b> — ${esc(x.why)}</li>`).join("")}</ul></span></div>`;
+          if((R.splits || []).length) h += `<div class="crow"><span class="ck">갈리는 지점</span><span class="cv"><ul class="clist">${R.splits.map(x => `<li><b>${esc(x.topic)}</b> — ${esc(x.sides)}</li>`).join("")}</ul></span></div>`;
+          if(R.churn) h += `<div class="crow"><span class="ck">이탈 신호</span><span class="cv">${esc(R.churn)}</span></div>`;
+        }
         h += `</details>`;
       }
     }
