@@ -18,7 +18,7 @@ import { parseJson } from "./cmt_ai.mjs";
 
 const SONNET = { model: "claude-sonnet-5-5", effort: "medium" };
 const EST_WORK = 0.11;   // 작품 1개당 예상(시범 실측 0.062 + 독자 분석·근거 번호로 늘어난 몫)
-const PER_EP = 12, MAX_EPS = 60, MIN_REFS = 2;
+const PER_EP = 15, MAX_EPS = 60, MIN_REFS = 2;
 const MOCK = !!process.env.CMT_MOCK;
 const STATE = "state/ai_state.json", OUT = "cmt_out";
 const args = { ids: [], capUsd: 3, limitUsd: 40, waitMin: 200, summary: null };
@@ -42,8 +42,10 @@ const DISLIKE_WORDS = /답답|고구마|억지|개연|캐붕|질질|어장|민�
 
 // ---- 요청 글 ----
 const SCHEMA = {
-  type: "object", additionalProperties: false, required: ["points", "lines"],
+  type: "object", additionalProperties: false, required: ["cast", "points", "lines"],
   properties: {
+    cast: { type: "array", items: { type: "object", additionalProperties: false, required: ["name", "aliases", "role"],
+      properties: { name: { type: "string" }, aliases: { type: "array", items: { type: "string" } }, role: { type: "string" } } } },
     lines: { type: "array", items: { type: "object", additionalProperties: false, required: ["key", "line", "refs"],
       properties: { key: { type: "string" }, line: { type: "string" }, refs: { type: "array", items: { type: "integer" } } } } },
     points: { type: "array", items: { type: "object", additionalProperties: false, required: ["key", "parts", "insight"],
@@ -60,6 +62,8 @@ const SYSTEM = `당신은 웹툰 기획 PD를 돕는 분석가입니다. 한 작
 1) 지어내지 않습니다. 웹툰 그림은 볼 수 없으므로 '그 회차에 실제로 있었던 일'은 회차 제목과 그 회차 댓글들이 공통으로 묘사하는 장면에서만 가져옵니다. 독자 반응은 댓글이 실제로 말한 것만 씁니다. 모든 칸에 근거 댓글 번호(refs, 입력의 #번호)를 2~6개 답니다. 근거 댓글이 2개가 안 되는 내용은 쓰지 않습니다. 프로그램이 번호를 검사해 근거가 부족한 칸은 버립니다.
 2) 누가 했는지는 근거 댓글에 그 인물의 이름·호칭(남주·여주·OO아 등)이 직접 나오거나 문맥상 분명할 때만 씁니다. 주어 없는 댓글(예: 안경 벗으니 짱)로 특정 인물을 단정하지 않습니다. 누가 + 무엇(행동·모습·대사)은 한 댓글 안에 함께 나와야 합니다. 서로 다른 댓글을 이어 붙여('안경 벗으니 짱' + '이섭 얼굴 좋다' → '이섭이 안경을 벗었다') 새 사실을 만들지 않습니다. 작품 소개의 인물 정보(이름·직업·관계)를 참고합니다. 다 쓴 뒤 다른 담당이 근거 댓글과 하나씩 대조해 틀린 칸은 고치거나 버립니다.
 3) 어느 작품에나 붙는 말로 쓰지 않습니다. '잘생겼다', '몰입된다', '작화가 좋다', '답답하다'만으로는 안 됩니다. 이 작품의 인물 이름·장면·설정·상황을 넣어, 다른 작품에는 그대로 쓸 수 없는 문장으로 씁니다. 스스로 점검: 작품 이름과 인물 이름만 바꿔 넣어도 말이 되면 다시 씁니다.
+
+cast: 댓글과 작품 소개에 나오는 주요 인물 목록. name(댓글에서 가장 많이 부르는 이름), aliases(댓글에서 그 인물을 부르는 다른 말 — 성까지 붙인 이름, '이름+이', 직함·호칭, 남주·여주·서브남 같은 역할 호칭), role(남주·여주·조연·악역 등). 프로그램이 이 목록으로 '누구 얘기인지'를 다시 검사합니다.
 
 points: 항목마다(key는 입력의 ID·S1·W1·RP·RW1·RS1·RC 그대로) parts 2~5개와 insight를 씁니다.
 - ID 이 작품만의 특색: 이 작품에서 두드러지는 결을 댓글 근거로 구체적으로 — 인물 조합과 관계 구도, 되풀이되는 장면 공식, 톤(개그·진지·수위), 연출 습관, 독자들이 만든 놀이 문화(별명·밈·팬덤 구호). parts 3~5개, insight는 이 작품의 정체성을 2~3문장으로. (장르의 흔한 공식인지 이 작품만의 것인지는 여러 작품을 모아 따로 비교하므로, 여기서는 일반 상식으로 짐작해 단정하지 말고 이 작품에서 실제로 두드러진 것만 씁니다.)
@@ -149,8 +153,7 @@ const CHECK_SYSTEM = `당신은 사실 확인 담당입니다. 다른 AI가 웹�
 fix일 때: 칸이면 name·detail·react 세 칸을 모두 다시 씁니다(이름에 틀린 내용이 들어 있으면 이름도 고치고, 바뀌지 않는 칸도 그대로 다시 씀). 한 줄 평이나 마무리 문장이면 line에 고친 전체 문장. 나머지는 빈 문자열. ok·drop이면 모두 빈 문자열.
 고친 문장에 '분명하지 않다', '확인되지 않는다' 같은 단서를 달지 말고, 근거로 확인되는 내용만 남겨 씁니다. 남길 내용이 없으면 drop.
 고친 문장도 댓글 문장을 그대로 옮기지 않고 요약합니다. 쉬운 한국어로.`;
-function checkText(w, second) {
-  const det = N.workInfo(w.id);
+function titlesOf(w) {
   const A = w.cm.analysis || {}, R = A.readers || {}, title = {};
   (A.strengths || []).forEach((p, i) => { title[`S${i + 1}`] = `먹힌 요소: ${p.point}`; });
   (A.weaknesses || []).forEach((p, i) => { title[`W${i + 1}`] = `안 먹힌 요소: ${p.point}`; });
@@ -159,13 +162,17 @@ function checkText(w, second) {
   (R.splits || []).forEach((x, i) => { title[`RS${i + 1}`] = `갈리는 지점: ${x.topic}`; });
   w.cm.themes.slice(0, 24).forEach((t, i) => { title[`T${i + 1}`] = `반복 반응 묶음: ${t.l}`; });
   for (const d of w.cm.dislike || []) title[DKEY[d.k]] = `불호: ${d.l}`;
+  return title;
+}
+function checkText(w, second) {
+  const det = N.workInfo(w.id), title = titlesOf(w);
   const epl = new Map(w.cm.eps.map((e) => [e.no, e.l || `${e.no}번`]));
   const ev = (refs) => refs.map((n) => { const c = w.num.get(n); return `#${n} (${epl.get(c.no)}) [${c.like}] ${clip(c.text, 160)}`; }).join("\n    ");
-  const lines = [`[작품] ${w.cm.title}`, `[작품 소개] ${clip(det.desc || "-", 300)}`, "", "[확인할 항목] K번호 (어느 칸) 문장 / 근거 댓글"];
+  const lines = [`[작품] ${w.cm.title}`, `[작품 소개] ${clip(det.desc || "-", 300)}`, `[주요 인물] ${(w.cast || []).map((c) => `${c.name}(${c.role}: ${c.al.join("·")})`).join(" / ") || "-"}`, "", "[확인할 항목] K번호 (어느 칸) 문장 / 근거 댓글"];
   for (const it of w.items.filter((x) => !second || x.need)) {
     const body = it.kind === "line" ? `한 줄 평: ${it.line}` : it.kind === "insight" ? `마무리 문장: ${it.insight}` : `이름: ${it.name} / 내용: ${it.detail} / 반응: ${it.react}`;
     lines.push(`${it.k} [${it.key} ${title[it.key] || ""}] (${it.kind === "part" ? "칸" : it.kind === "line" ? "한 줄 평" : "마무리"}) ${body}`, `    ${ev(it.refs)}`);
-    if (second) lines.push(`    추가로 찾은 댓글(그 회차 공개 직후 댓글 중 '${(it.need || []).join("·")}' 포함):`, (it.extra || []).length ? `    ${ev(it.extra)}` : "    (찾은 댓글 없음)");
+    if (it.kwShown) lines.push(`    추가로 찾은 댓글(그 회차 공감순 상위 500개 중 '${it.kwShown.join("·")}' 포함 — 누구 얘기인지 이걸로 확인):`, (it.extra || []).length ? `    ${ev(it.extra)}` : "    (찾은 댓글 없음)");
   }
   return lines.join("\n");
 }
@@ -174,7 +181,7 @@ function checkText(w, second) {
 const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {};
 state.spend ||= {};
 const SPENT0 = state.spend[MONTH] || 0;
-const report = { cost: { deep: 0, check: 0, check2: 0 }, batches: {}, notes: [], tokens: {}, dropped: 0, kept: 0, checkOk: 0, checkFix: 0, checkDrop: 0, checkNeed: 0 };
+const report = { cost: { deep: 0, check: 0, check2: 0 }, batches: {}, notes: [], tokens: {}, dropped: 0, kept: 0, checkOk: 0, checkFix: 0, checkDrop: 0, checkNeed: 0, flagged: 0 };
 function charge(usd, label) { if (MOCK) return; state.spend[MONTH] = (state.spend[MONTH] || 0) + usd; mkdirSync("state", { recursive: true }); writeFileSync(STATE, JSON.stringify(state, null, 1) + "\n"); log(`  ${label} 비용 $${usd.toFixed(4)} → 이 달 합계 $${state.spend[MONTH].toFixed(2)}`); }
 const costOf = (m, u) => { const t = (report.tokens[m] ||= { in: 0, out: 0, calls: 0 }); t.in += u.input_tokens || 0; t.out += u.output_tokens || 0; t.calls++; return MOCK ? 0 : rawCost(m, u); };
 function mockAnswer(cid, body) {
@@ -183,7 +190,7 @@ function mockAnswer(cid, body) {
   const keys = [...body.matchAll(/^(ID|S\d+|W\d+|RP|RW\d+|RS\d+|RC) /gm)].map((m) => m[1]);
   const lkeys = [...body.matchAll(/^(T\d+|DG|DS|DF) /gm)].map((m) => m[1]);
   const ns = [...body.matchAll(/^#(\d+) \[/gm)].map((m) => Number(m[1]));
-  return { lines: lkeys.map((key, i) => ({ key, line: "가짜 한 줄 평", refs: ns.slice(i, i + 2) })), points: keys.map((key, i) => ({ key, parts: [{ name: "가짜 항목", detail: "가짜 장면", react: "가짜 반응", refs: ns.slice(i, i + 3) }, { name: "근거 부족", detail: "버려져야 함", react: "-", refs: [ns[0]] }], insight: "가짜 배울 점" })) };
+  return { cast: [{ name: "이섭", aliases: ["태이섭", "남주"], role: "남주" }, { name: "민경", aliases: ["강민경", "여주"], role: "여주" }], lines: lkeys.map((key, i) => ({ key, line: "가짜 한 줄 평", refs: ns.slice(i, i + 2) })), points: keys.map((key, i) => ({ key, parts: [{ name: "가짜 항목", detail: "가짜 장면", react: "가짜 반응", refs: ns.slice(i, i + 3) }, { name: "근거 부족", detail: "버려져야 함", react: "-", refs: [ns[0]] }], insight: "가짜 배울 점" })) };
 }
 const { stage } = createBatcher({ mock: MOCK, mockAnswer, waitMin: args.waitMin, tStart: T_START, charge, report, log });
 
@@ -197,7 +204,7 @@ try {
     if (!cm.analysis) { report.notes.push(`작품 분석 없음: ${cm.title}`); continue; }
     const nos = pickEpisodes(cm), best = [];
     try {
-      for (const no of nos) { const b = await N.fetchBest(id, no); best.push([no, b.comments.slice(0, PER_EP)]); }
+      for (const no of nos) { const b = await N.fetchPopular(id, no, PER_EP); best.push([no, b.comments]); }   // 공감순(인기순) 상위
       // 불호가 몰린 회차는 공개 직후 댓글 중 불호 단어가 든 것도(베스트엔 불평이 잘 안 오름)
       const byLabel = new Map(cm.eps.map((e) => [e.l, e.no]));
       const dnos = new Set(); for (const d of cm.dislike || []) if (d.n) for (const [l] of (d.e || []).slice(0, 2)) if (byLabel.has(l)) dnos.add(byLabel.get(l));
@@ -231,6 +238,7 @@ try {
       usd += costOf(SONNET.model, r.message.usage || {});
       let p; try { p = parseJson(r.message); } catch (e) { report.notes.push(`해석 실패: ${w.cm.title}`); continue; }
       const okRefs = (x) => [...new Set((x.refs || []).filter((n) => w.num.has(n)))];
+      w.cast = (p.cast || []).map((c) => ({ name: c.name, role: c.role, al: [...new Set([c.name, ...(c.aliases || [])].map((a) => String(a || "").trim()).filter((a) => a.length >= 2))] })).filter((c) => c.al.length);
       w.items = [];
       for (const x of p.lines || []) { if (!LK.test(x.key)) continue; const refs = okRefs(x); if (refs.length < MIN_REFS) { report.dropped++; continue; } w.items.push({ key: x.key, kind: "line", line: x.line, refs }); }
       for (const pt of p.points || []) {
@@ -257,7 +265,7 @@ try {
         if (second || !kw.length) { report.checkDrop++; return false; }   // 더 찾아봐도 불분명하면 버림
         it.need = kw; report.checkNeed++; return true;
       }
-      if (second) { const more = (x.more || []).filter((n) => (it.extra || []).includes(n)); it.refs = [...new Set([...it.refs, ...more])]; }
+      if ((it.extra || []).length) { const more = (x.more || []).filter((n) => it.extra.includes(n)); it.refs = [...new Set([...it.refs, ...more])]; }
       delete it.need;
       if (x.v === "fix") {
         report.checkFix++;
@@ -284,22 +292,64 @@ try {
         return usd;
       });
   };
-  await checkStage("사실 확인(Sonnet)", "check", works.filter((w) => w.items && w.items.length), false);
-  // 불분명한 칸: 근거 댓글이 달린 회차의 공개 직후 댓글 300개에서 찾을 단어가 든 댓글(좋아요 순 15개)을 더 붙임
-  const needW = works.filter((w) => w.items && w.items.some((it) => it.need));
-  for (const w of needW) {
-    const cache = new Map(), seen = new Set([...w.num.values()].map((c) => c.cid));
-    for (const it of w.items.filter((x) => x.need)) {
-      const nos = [...new Set(it.refs.map((n) => w.num.get(n).no))].slice(0, 3), found = [];
+  // 더 찾은 증거: 근거 댓글이 달린 회차의 공감순(인기순) 상위 500개에서 찾을 단어가 든 댓글(공감 순 15개)
+  const gather = async (w, list, keyOf) => {
+    w.pop ||= new Map(); w.seen ||= new Set([...w.num.values()].map((c) => c.cid));
+    for (const it of list) {
+      const kw = keyOf(it), nos = [...new Set(it.refs.map((n) => w.num.get(n).no))].slice(0, 3), found = [];
       try {
         for (const no of nos) {
-          if (!cache.has(no)) cache.set(no, (await N.fetchEarly(w.id, no, 300)).comments.map((c) => ({ ...c, no })));
-          found.push(...cache.get(no).filter((c) => !seen.has(c.cid) && it.need.some((k) => c.text.includes(k))));
+          if (!w.pop.has(no)) w.pop.set(no, (await N.fetchPopular(w.id, no, 500)).comments.map((c) => ({ ...c, no })));
+          found.push(...w.pop.get(no).filter((c) => kw.some((k) => c.text.includes(k))));
         }
       } catch (e) { if (e instanceof N.NaverBlocked) throw e; }
-      it.extra = found.sort((a, b) => b.like - a.like).slice(0, 15).map((c) => { const n = w.num.size + 1; w.num.set(n, { no: c.no, like: c.like, text: c.text, cid: c.cid }); seen.add(c.cid); return n; });
+      const add = [];
+      for (const c of found.sort((a, b) => b.like - a.like)) {
+        if (add.length >= 15) break;
+        const old = [...w.num.entries()].find(([, x]) => x.cid === c.cid);   // 이미 받은 댓글이면 같은 번호로
+        if (old) { if (!it.refs.includes(old[0])) add.push(old[0]); continue; }
+        const n = w.num.size + 1; w.num.set(n, { no: c.no, like: c.like, text: c.text, cid: c.cid }); add.push(n);
+      }
+      it.extra = [...new Set([...(it.extra || []), ...add])];
+      it.kwShown = kw;
     }
-    log(`  ${w.cm.title}: 누구 얘기인지 불분명한 칸 ${w.items.filter((x) => x.need).length}개 → 그 회차 댓글을 더 찾아 다시 확인`);
+  };
+  // 프로그램 검사: 어떤 인물에 대한 칸인데 칸의 구체 단어(예: 안경)가 그 인물 이름·호칭과 '같은 근거 댓글'에 함께 나오지 않으면 → 확인 필요
+  //   (2026-10-12: 사실 확인 AI가 '안경 벗으니 짱'을 끝까지 남주 얘기로 읽고 불분명 판정을 안 냄 → AI가 알아채길 기다리지 않고 프로그램이 표시)
+  const STOP = new Set(["장면", "반응", "모습", "매력", "독자", "댓글", "칭찬", "호평", "연출", "작화", "얼굴", "비주얼", "회차", "남주", "여주", "인물", "캐릭터", "감탄", "환호", "분위기", "관계", "사이", "이야기", "전개", "느낌", "표정", "등장", "공개", "대사"]);
+  const PART = /(은|는|이|가|을|를|의|에|에서|와|과|도|로|으로|한|된|던|하는|했던|하던|에게|까지|부터|처럼|만|이나|나)$/;
+  const tokens = (s) => String(s || "").split(/[\s,.·~!?()'"“”‘’/·]+/).map((t) => t.replace(PART, "")).filter((t) => t.length >= 2 && !/^\d+(화|번)?$/.test(t) && !STOP.has(t));
+  const flagAmbiguous = (w) => {
+    const title = titlesOf(w), cast = w.cast || [];
+    let n = 0;
+    for (const it of w.items || []) {
+      if (it.kind === "insight") continue;
+      const text = it.kind === "line" ? it.line : `${it.name} ${it.detail}`;
+      const ctx = `${text} ${title[it.key] || ""}`;
+      const who = cast.filter((c) => c.al.some((a) => ctx.includes(a)));
+      if (!who.length) continue;
+      const aliases = who.flatMap((c) => c.al);
+      const refs = it.refs.map((k) => w.num.get(k).text);
+      const kws = [];
+      for (const t of tokens(it.kind === "line" ? it.line : it.name)) {
+        if (aliases.some((a) => t.includes(a) || a.includes(t))) continue;
+        const with_t = refs.filter((r) => r.includes(t));
+        if (with_t.length && !with_t.some((r) => aliases.some((a) => r.includes(a)))) kws.push(t);   // 단어는 나오는데 그 인물과 같은 댓글엔 없음
+      }
+      if (kws.length) { it.flag = kws.slice(0, 2); n++; }
+    }
+    return n;
+  };
+  for (const w of works.filter((x) => x.items && x.items.length)) {
+    const n = flagAmbiguous(w);
+    if (n) { await gather(w, w.items.filter((it) => it.flag), (it) => it.flag); report.flagged += n; log(`  ${w.cm.title}: 인물과 구체 내용이 같은 댓글에 없는 칸 ${n}개 → 그 회차 공감순 댓글에서 더 찾아 함께 확인`); }
+  }
+  await checkStage("사실 확인(Sonnet)", "check", works.filter((w) => w.items && w.items.length), false);
+  // 사실 확인 AI가 '불분명'(need)으로 본 칸도 같은 방식으로 더 찾아 한 번 더 확인 → 그래도 불분명하면 버림
+  const needW = works.filter((w) => w.items && w.items.some((it) => it.need));
+  for (const w of needW) {
+    await gather(w, w.items.filter((x) => x.need), (it) => it.need);
+    log(`  ${w.cm.title}: 누구 얘기인지 불분명한 칸 ${w.items.filter((x) => x.need).length}개 → 그 회차 공감순 댓글을 더 찾아 다시 확인`);
   }
   await checkStage("불분명한 칸 다시 확인(Sonnet)", "check2", needW, true);
   // 3) 확정 — 회차 링크는 근거 댓글이 달린 회차, 칸마다 근거 수·좋아요, 원문 겹침 가림(공개 저장소)
@@ -329,7 +379,7 @@ try {
   writeFileSync(`${OUT}/deep.json`, JSON.stringify({ month: MONTH, mock: MOCK, works: out }));
   writeFileSync(`${OUT}/spend.json`, JSON.stringify({ month: MONTH, delta: (state.spend[MONTH] || 0) - SPENT0 }));
   const lines = [`## 작품·독자 분석 자세히${MOCK ? " (가짜 답)" : ""}`, `- 작품: ${works.map((w) => w.cm.title).join(", ")}`, `- 네이버 요청 ${N.requests}번`,
-    `- 자세히 쓴 작품 ${Object.keys(out).length}개 · 올린 칸 ${report.kept}개 · 근거 2개 미만이라 버린 칸 ${report.dropped}개 · 사실 확인: 맞음 ${report.checkOk} / 근거대로 고침 ${report.checkFix} / 확인 안 돼 버림 ${report.checkDrop} · 불분명해서 댓글을 더 찾아 다시 확인 ${report.checkNeed}`,
+    `- 자세히 쓴 작품 ${Object.keys(out).length}개 · 올린 칸 ${report.kept}개 · 근거 2개 미만이라 버린 칸 ${report.dropped}개 · 사실 확인: 맞음 ${report.checkOk} / 근거대로 고침 ${report.checkFix} / 확인 안 돼 버림 ${report.checkDrop} · 인물·내용이 같은 댓글에 없어 프로그램이 더 찾은 칸 ${report.flagged} · AI가 불분명하다고 해 더 찾은 칸 ${report.checkNeed}`,
     `- AI 비용 $${(report.cost.deep + report.cost.check + report.cost.check2).toFixed(3)} (자세히 $${report.cost.deep.toFixed(3)} + 사실 확인 $${(report.cost.check + report.cost.check2).toFixed(3)}) / 이 달 합계 $${(state.spend[MONTH] || 0).toFixed(2)}`,
     `- 토큰: ${Object.entries(report.tokens).map(([m, t]) => `${m} 입력 ${t.in} · 출력 ${t.out} (${t.calls}번)`).join(" / ")}`,
     ...report.notes.map((n) => "- " + n), ...(report.error ? ["- 오류: " + report.error] : [])];

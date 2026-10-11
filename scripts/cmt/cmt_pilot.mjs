@@ -94,14 +94,15 @@ async function collect(id) {
     if (g === 0) e.ext.push("여러 화 동시 공개");
     else if (g >= CFG.hiatusX * medGap) { e.ext.push(`휴재 후 복귀(${g}일 만)`); dated[i - 1].ext.push(`휴재 직전(다음 화까지 ${g}일)`); }
   });
-  // 전 회차 베스트 → 튄 회차 공개 직후
+  // 전 회차 공감순(인기순) 상위 5%(최소 30·최대 150) → 튄 회차 공개 직후
   let k = 0;
   for (const e of eps) {
-    const b = await N.fetchBest(id, e.no);
+    const need = Math.min(CFG.popMax, Math.max(CFG.popMin, Math.round((e.count || 0) * CFG.popPct)));
+    const b = await N.fetchPopular(id, e.no, need);
     e.label = e.label || b.label || `${e.no}번`;
-    e._best = b.comments.slice(0, CFG.bestPerEp);
+    e._best = b.comments;
     e.analyzed = e._best.length > 0;
-    if (++k % 40 === 0) log(`  베스트 ${k}/${eps.length}화`);
+    if (++k % 40 === 0) log(`  공감순 ${k}/${eps.length}화`);
   }
   for (const e of eps.filter((x) => x.deep)) {
     const r = await N.fetchEarly(id, e.no, CFG.earlyN);

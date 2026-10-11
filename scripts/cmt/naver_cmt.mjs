@@ -82,6 +82,17 @@ function clean(p) {   // 작성자 정보는 여기서 버림
 }
 
 // 공감순 베스트(최대 15) + 회차 이름
+// 공감순(인기순) 상위 n개 — 댓글 '검색' 주소에 검색어 없이 요청하면 인기순으로 옴(앞 15개 = 네이버 베스트와 같음, 2026-10-12 확인).
+// 요청 1번에 최대 500개. 앱의 공감순 정렬과 같은 목록. 삭제·가림 댓글이 섞여 오므로 조금 넉넉히 받아 자름
+export async function fetchPopular(id, no, n) {
+  const want = Math.min(500, Math.max(1, Math.ceil(n * 1.15) + 5));
+  const j = await get(`${NC.CB}/v1/page/${NC.pageId(id, no)}/posts/search?nextSize=${want}`, { comment: true });
+  const r = j.result || {}, out = [];
+  let label = "";
+  for (const p of r.posts || []) { if (!label && p.pageName) label = String(p.pageName).trim(); const c = clean(p); if (c) out.push({ ...c, best: true }); }
+  return { label, comments: out.slice(0, n), total: r.activeRootPostCount ?? null };
+}
+
 export async function fetchBest(id, no) {
   const j = await get(`${NC.CB}/v1/page/${NC.pageId(id, no)}/top-recent-posts?topCount=15&recentTopCount=0&pinRepresentation=distinct`, { comment: true });
   const r = j.result || {}, seen = new Set(), out = [];
