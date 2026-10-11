@@ -1,4 +1,4 @@
-/* 네이버웹툰 회차 댓글 분석 — 시범 실행 (작품 1~3개) · 리디 트래커 cmt_pilot.mjs 2판('반복되는 반응을 있는 그대로 세기')의 네이버판
+/* 네이버웹툰 회차 댓글 분석 — 손으로 실행 (한 번에 작품 최대 30개, 워크플로가 남은 작품을 다음 실행으로 넘김) · 리디 트래커 cmt_pilot.mjs 2판('반복되는 반응을 있는 그대로 세기')의 네이버판
  *
  * ① 수집(로그인 없음, 2초 간격): 회차 목록·공개일 → 회차별 댓글 수 → 전 회차 '베스트 댓글'(공감순 최대 15) →
  *    댓글 수가 튄 회차(급증: 앞뒤 5화 둘 다의 2배↑ 상위 5개 / 급감: 다음 4화가 40%↓인 지점 3개와 그 다음 화)는 '공개 직후 첫 500개'.
@@ -34,6 +34,7 @@ const EST_NEEDS_WORK = 0.15;      // 3단계: 작품 1개당 예상
 const EST_RECHECK_PER = 0.0006;   // 불호 재확인: 댓글 1개당 예상(Sonnet)
 const MOCK = !!process.env.CMT_MOCK;
 
+const MAX_IDS = 30;   // 수집 2초 간격 × 작품당 ~130요청 → 30개면 약 2.5시간(작업 시간 제한 6시간 안)
 const args = { ids: [], limitUsd: 30, capUsd: 3, waitMin: 100, collectOnly: false, summary: null };
 for (let i = 2; i < process.argv.length; i++) {
   const k = process.argv[i], v = () => process.argv[++i];
@@ -46,7 +47,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else throw new Error("모르는 옵션: " + k);
 }
 for (const k of ["limitUsd", "capUsd", "waitMin"]) if (!Number.isFinite(args[k]) || args[k] <= 0) throw new Error(`${k} 값이 숫자가 아닙니다`);
-if (!args.ids.length || args.ids.length > 3 || args.ids.some((x) => !/^\d{3,9}$/.test(x))) throw new Error("--ids 에 작품 번호(titleId) 1~3개를 쉼표로 넣어 주세요");
+if (!args.ids.length || args.ids.length > MAX_IDS || args.ids.some((x) => !/^\d{3,9}$/.test(x))) throw new Error(`--ids 에 작품 번호(titleId) 1~${MAX_IDS}개를 쉼표로 넣어 주세요`);
 const T_START = Date.now();
 const MONTH = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 7);
 const log = (...a) => console.log(...a);
@@ -122,7 +123,12 @@ function pickSample(w) {
 }
 
 // ---------------- 일괄 처리(batch.mjs) ----------------
-const costOf = (model, u) => (MOCK ? 0 : rawCost(model, u));
+// 토큰 사용량도 모델별로 모아 둔다(다음 확대 때 비용 추정을 실측으로 맞추려고)
+const costOf = (model, u) => {
+  const t = (report.tokens[model] ||= { in: 0, out: 0, cacheRead: 0, cacheWrite: 0, calls: 0 });
+  t.in += u.input_tokens || 0; t.out += u.output_tokens || 0; t.cacheRead += u.cache_read_input_tokens || 0; t.cacheWrite += u.cache_creation_input_tokens || 0; t.calls++;
+  return MOCK ? 0 : rawCost(model, u);
+};
 function mockAnswer(customId, body) {
   const ns = [...body.matchAll(/#(\d+) \[/g)].map((m) => Number(m[1]));
   if (customId.startsWith("t-")) return { themes: [
@@ -340,7 +346,7 @@ function applyNeeds(works, out) {
 const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {};
 state.spend ||= {};
 const report = { version: 1, platform: "naver", generated_at: new Date().toISOString(), cfg: CFG, models: { haiku: HAIKU, sonnet: SONNET },
-  cost: { theme: 0, theme2: 0, haiku: 0, recheck: 0, needs: 0 }, batches: {}, notes: [], dropped: 0, demoted: 0, promoted: 0, scrubbed: 0, mock: MOCK };
+  cost: { theme: 0, theme2: 0, haiku: 0, recheck: 0, needs: 0 }, tokens: {}, batches: {}, notes: [], dropped: 0, demoted: 0, promoted: 0, scrubbed: 0, mock: MOCK };
 let works = [];
 const GRAM = 12;   // 공개 결과에 원문이 실리지 않게: AI 글이 어떤 댓글과 공백 빼고 12자 넘게 겹치면 가림
 function scrubber(w) {
@@ -377,7 +383,11 @@ function charge(usd, label) {
 const { stage } = createBatcher({ mock: MOCK, mockAnswer, waitMin: args.waitMin, tStart: T_START, charge, report, log });
 
 try {
-  for (const id of args.ids) works.push(await collect(id));
+  for (const id of args.ids) {
+    try { works.push(await collect(id)); }
+    catch (e) { if (e instanceof N.NaverBlocked) throw e; report.notes.push(`수집 실패로 건너뜀: ${id} (${e.message})`); log(`  수집 실패로 건너뜀: ${id} — ${e.message}`); }
+  }
+  if (!works.length) throw new Error("수집된 작품이 없습니다");
   for (const w of works) pickSample(w);
   const nC = works.reduce((t, w) => t + w.sample.length, 0);
   log(`수집 끝: 네이버 요청 ${N.requests}번, 분석 대상 ${nC}개 (베스트 ${works.reduce((t, w) => t + w.sample.filter((c) => c.pick === "best").length, 0)} + 공개 직후 ${works.reduce((t, w) => t + w.sample.filter((c) => c.pick === "early").length, 0)})`);
@@ -419,8 +429,9 @@ try {
   const lines = [`## 네이버 회차 댓글 분석 시범${MOCK ? " (가짜 답)" : ""}`, `- 작품: ${works.map((w) => w.title).join(", ")}`, `- 네이버 요청 ${N.requests}번`,
     `- 표시한 댓글 ${works.reduce((t, w) => t + (w.sample || []).filter((c) => c.lab).length, 0)}개, 반복 반응 묶음 ${works.map((w) => (w.themes || []).length).join("·")}개`,
     `- '불호' 묶음에서 뺀 겉말 불평 ${report.dropped}개, 재확인에서 불호 아님으로 돌린 것 ${report.demoted}개, 불호 단어로 넓혀 찾은 불호 ${report.promoted}개, 원문과 겹쳐 가린 글 ${report.scrubbed || 0}개`,
-    `- 불호 세 가지: ${works.map((w) => w.title + ' ' + Object.values(w.dislikeKinds || {}).map((k) => k.label.split('(')[0] + ' ' + k.count).join('·')).join(' / ')} · 연재 운영 얘기(분석 제외) ${works.map((w) => w.ops || 0).join('·')}개`,
+    `- 불호 세 가지: ${works.map((w) => w.title + ' ' + Object.values(w.dislikeKinds || {}).map((k) => k.label.split('(')[0] + ' ' + k.count).join('·')).join(' / ')} · 연재 운영·인사(분석 제외) ${works.map((w) => w.ops || 0).join('·')}개`,
     `- AI 비용 $${usd.toFixed(3)} (묶음 찾기 $${(report.cost.theme + report.cost.theme2).toFixed(3)} + 표시 $${report.cost.haiku.toFixed(3)} + 불호 재확인 $${report.cost.recheck.toFixed(3)} + 니즈 맵 $${report.cost.needs.toFixed(3)}) / 이 달 합계 $${(state.spend[MONTH] || 0).toFixed(2)}`,
+    `- 토큰: ${Object.entries(report.tokens).map(([m, t]) => `${m} 입력 ${t.in} · 캐시 읽기 ${t.cacheRead} · 캐시 쓰기 ${t.cacheWrite} · 출력 ${t.out} (${t.calls}번)`).join(" / ")}`,
     ...report.notes.map((n) => "- " + n), ...(report.error ? ["- 오류: " + report.error] : [])];
   log(lines.join("\n"));
   if (args.summary) appendFileSync(args.summary, lines.join("\n") + "\n");
