@@ -256,23 +256,23 @@ footer a:hover{text-decoration:underline}
 .cbars{display:flex; align-items:flex-end; gap:1px; height:118px; border-bottom:1px solid var(--border-strong); background:linear-gradient(var(--border) 1px, transparent 1px) 0 50%/100% 50% no-repeat}
 .cbar{flex:1 1 0; min-width:2px; border:0; padding:0; margin:0; background:var(--accent); opacity:.55; border-radius:2px 2px 0 0; cursor:pointer; transition:opacity .1s}
 .cbar:hover{opacity:.9}
-.cbar.k-up{background:var(--up); opacity:.85}
-.cbar.k-down{background:var(--down); opacity:.85}
+.cbar.k-up{background:var(--down); opacity:.85}   /* 댓글 급증 = 파랑, 급감 지점 = 빨강(사용자 요청 2026-10-11) */
+.cbar.k-down{background:var(--up); opacity:.85}
 .cbar.sel{opacity:1; outline:2px solid var(--ink); outline-offset:0}
 .cbar:focus-visible{outline:2px solid var(--ink)}
 .cxax{display:flex; justify-content:space-between; gap:8px; font-size:10.5px; color:var(--faint); margin-top:4px}
 .cxax span{white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:40%}
 .cleg{display:flex; align-items:center; gap:4px; max-width:none !important}
 .cleg i{width:8px; height:8px; border-radius:2px; display:inline-block; margin-left:6px}
-.cleg i.k-up{background:var(--up)} .cleg i.k-down{background:var(--down)}
+.cleg i.k-up{background:var(--down)} .cleg i.k-down{background:var(--up)}
 .chint{font-size:11.5px; color:var(--muted); margin-top:6px; min-height:17px}
 .cep{margin-top:10px; padding:11px 12px; border-radius:10px; background:var(--surface-2)}
 .ceph{display:flex; justify-content:space-between; align-items:baseline; gap:10px; flex-wrap:wrap}
 .ceph b{font-size:14px} .ceph span{font-size:12px; color:var(--muted)}
 .cchips{display:flex; flex-wrap:wrap; gap:5px; margin-top:7px}
 .cchip{font-size:11px; font-weight:600; padding:2px 8px; border-radius:20px; background:var(--surface); color:var(--muted); border:1px solid var(--border)}
-.cchip.k-up,.cchip.m-hot{color:var(--up); background:var(--up-soft); border-color:transparent}
-.cchip.k-down,.cchip.m-cold{color:var(--down); background:var(--down-soft); border-color:transparent}
+.cchip.k-down,.cchip.m-hot{color:var(--up); background:var(--up-soft); border-color:transparent}
+.cchip.k-up,.cchip.m-cold{color:var(--down); background:var(--down-soft); border-color:transparent}
 .cchip.m-good{color:var(--accent-ink); background:var(--accent-soft); border-color:transparent}
 .cchip.m-mixed{color:var(--gold); border-color:var(--gold)}
 .cchip.c-ext{color:var(--faint)}
