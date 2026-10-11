@@ -430,6 +430,7 @@ const scrubDeep = (o, sc) => typeof o === "string" ? sc(o) : Array.isArray(o) ? 
 // ---------------- 실행 ----------------
 const state = existsSync(STATE) ? JSON.parse(readFileSync(STATE, "utf8")) : {};
 state.spend ||= {};
+const SPENT0 = state.spend[MONTH] || 0;   // 이번 실행이 쓴 만큼(끝 - 시작)을 cmt_out/spend.json 에 — 여러 줄로 동시에 돌 때 워크플로가 최신 사용액에 더함
 const report = { version: 1, platform: "naver", generated_at: new Date().toISOString(), cfg: CFG, models: { haiku: HAIKU, sonnet: SONNET },
   cost: { theme: 0, theme2: 0, haiku: 0, epsum: 0, recheck: 0, analysis: 0 }, tokens: {}, batches: {}, notes: [], dropped: 0, demoted: 0, promoted: 0, scrubbed: 0, mock: MOCK };
 let works = [];
@@ -516,6 +517,7 @@ try {
   process.exitCode = 1;
 } finally {
   save();
+  writeFileSync(`${OUT}/spend.json`, JSON.stringify({ month: MONTH, delta: (state.spend[MONTH] || 0) - SPENT0 }));
   const usd = report.cost.theme + report.cost.theme2 + report.cost.haiku + report.cost.epsum + report.cost.recheck + report.cost.analysis;
   const lines = [`## 네이버 회차 댓글 분석 시범${MOCK ? " (가짜 답)" : ""}`, `- 작품: ${works.map((w) => w.title).join(", ")}`, `- 네이버 요청 ${N.requests}번`,
     `- 표시한 댓글 ${works.reduce((t, w) => t + (w.sample || []).filter((c) => c.lab).length, 0)}개, 반복 반응 묶음 ${works.map((w) => (w.themes || []).length).join("·")}개`,

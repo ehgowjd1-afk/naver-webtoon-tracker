@@ -26,6 +26,10 @@ on:
         description: "이 달 네이버 AI 한도(달러) — 넘을 것 같으면 보내지 않고 멈춤"
         type: string
         default: "30"
+      lane:
+        description: "동시에 돌릴 줄 이름(a·b·c…) — 같은 줄끼리는 하나씩, 다른 줄은 동시에"
+        type: string
+        default: "a"
       mock:
         description: "가짜 답 모드(돈 안 듦)"
         type: boolean
@@ -36,7 +40,7 @@ permissions:
   actions: write   # 남은 작품으로 이 워크플로를 다시 부를 때
 
 concurrency:
-  group: ai-comments
+  group: ai-comments-${{ inputs.lane }}
   cancel-in-progress: false
 
 jobs:
@@ -83,17 +87,23 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
       # 사이트용(원문 없음: 숫자·묶음 이름·AI 요약)으로 내보내서 docs/data/cmt 에 합침 → 사이트 작품 상세에 바로 보임
+      # 여러 줄(lane)이 동시에 돌 수 있어서: 최신 main 위에서 다시 내보내고(목록은 작품 파일 전부로 다시 만듦) 이번 실행이 쓴 금액만 더한 뒤 올림
       - name: 사이트 반영 + 이 달 AI 사용액 커밋
         if: always()
         run: |
-          node scripts/cmt/export_site.mjs cmt_out/result.json docs/data/cmt || echo "사이트 내보내기 실패(사용액만 커밋)"
           git config user.name "ehgowjd1-afk"
           git config user.email "ehgowjd1@gmail.com"
-          [ -f state/ai_state.json ] && git add state/ai_state.json
-          [ -d docs/data/cmt ] && git add docs/data/cmt
-          git diff --cached --quiet && exit 0
-          git commit -m "data: 댓글 분석 사이트 반영 + AI 사용액"
-          for i in 1 2 3; do git pull --rebase --autostash -X theirs && git push && exit 0 || (git rebase --abort 2>/dev/null; sleep 5); done
+          for i in 1 2 3 4 5 6; do
+            git fetch -q origin main && git reset -q --hard origin/main
+            node scripts/cmt/export_site.mjs cmt_out/result.json docs/data/cmt || echo "사이트 내보내기 실패(사용액만 커밋)"
+            node -e 'const fs=require("fs");let d;try{d=JSON.parse(fs.readFileSync("cmt_out/spend.json","utf8"))}catch(e){process.exit(0)}if(!d.delta)process.exit(0);const p="state/ai_state.json";let s={};try{s=JSON.parse(fs.readFileSync(p,"utf8"))}catch(e){}s.spend=s.spend||{};s.spend[d.month]=(s.spend[d.month]||0)+d.delta;fs.mkdirSync("state",{recursive:true});fs.writeFileSync(p,JSON.stringify(s,null,1)+"\n");console.log("이번 실행 사용액",d.delta.toFixed(3),"→ 이 달",s.spend[d.month].toFixed(2))'
+            [ -f state/ai_state.json ] && git add state/ai_state.json
+            [ -d docs/data/cmt ] && git add docs/data/cmt
+            git diff --cached --quiet && exit 0
+            git commit -q -m "data: 댓글 분석 사이트 반영 + AI 사용액"
+            git push -q origin HEAD:main && exit 0
+            sleep $((5 + RANDOM % 20))
+          done
           exit 1
       # 이번 몫이 성공했을 때만 남은 작품으로 다시 부름(실패·한도 초과면 멈춤)
       - name: 남은 작품 다음 실행으로
@@ -105,4 +115,5 @@ jobs:
           CAP_USD: ${{ inputs.cap_usd }}
           LIMIT_USD: ${{ inputs.limit_usd }}
           MOCK: ${{ inputs.mock }}
-        run: gh workflow run cmt-pilot.yml --ref "${{ github.ref_name }}" -f ids="$REST" -f chunk="$CHUNK" -f cap_usd="$CAP_USD" -f limit_usd="$LIMIT_USD" -f mock="$MOCK"
+          LANE: ${{ inputs.lane }}
+        run: gh workflow run cmt-pilot.yml --ref "${{ github.ref_name }}" -f ids="$REST" -f chunk="$CHUNK" -f cap_usd="$CAP_USD" -f limit_usd="$LIMIT_USD" -f mock="$MOCK" -f lane="$LANE"

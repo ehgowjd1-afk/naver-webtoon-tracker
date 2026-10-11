@@ -1,10 +1,10 @@
 /* 댓글 분석 결과(cmt_out/result.json — 원문 없음) → 사이트용 파일
  *   docs/data/cmt/{titleId}.json : 회차별(댓글 수·급증/급감·이 화 내용/반응·많이 나온 묶음·불호) + 반복 반응 묶음 + 불호 세 가지 + 작품·독자 분석
- *   docs/data/cmt/index.json     : 분석된 작품 목록(요약) — 실행할 때마다 합쳐서 갱신
+ *   docs/data/cmt/index.json     : 분석된 작품 목록(요약) — 실행할 때마다 폴더의 작품 파일 전부로 다시 만듦(여러 줄로 동시에 돌아도 빠지는 작품 없게)
  * 공개 저장소라 댓글 원문·번호는 싣지 않는다(숫자·묶음 이름·AI 요약만, AI 글은 cmt_pilot에서 원문 겹침을 이미 가림).
  *   node scripts/cmt/export_site.mjs [cmt_out/result.json] [docs/data/cmt]
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 
 const SRC = process.argv[2] || "cmt_out/result.json";
 const DIR = process.argv[3] || "docs/data/cmt";
@@ -17,7 +17,6 @@ const KINDS = ["goguma", "stuffy", "forced"];
 const topEps = (o, n) => Object.entries(o || {}).sort((a, b) => b[1] - a[1]).slice(0, n);
 
 const idxPath = `${DIR}/index.json`;
-const index = existsSync(idxPath) ? JSON.parse(readFileSync(idxPath, "utf8")) : { works: {} };
 let wrote = 0;
 for (const w of R.works || []) {
   const cs = (w.comments || []).filter((c) => c.lab);
@@ -55,12 +54,16 @@ for (const w of R.works || []) {
     analysis: w.analysis || null
   };
   writeFileSync(`${DIR}/${w.id}.json`, JSON.stringify(out));
-  const spikes = eps.filter((e) => e.k === "급증").length, drops = eps.filter((e) => e.k === "급감 직전").length;
-  index.works[w.id] = { t: w.title, u: day, n: cs.length, eps: eps.length,
-    like: themes.filter((t) => t.bucket === "like").slice(0, 2).map((t) => t.l),
-    dk: out.dislike.map((x) => x.n), sp: spikes, dr: drops, sum: (w.analysis && w.analysis.summary) || "" };
   wrote++;
 }
-index.updated = day;
+// 목록은 폴더의 작품 파일 전부로 다시 만든다
+const index = { updated: day, works: {} };
+for (const f of readdirSync(DIR).filter((f) => /^\d+\.json$/.test(f))) {
+  const o = JSON.parse(readFileSync(`${DIR}/${f}`, "utf8"));
+  index.works[o.id] = { t: o.title, u: o.updated, n: o.n.total, eps: o.eps.length,
+    like: o.themes.filter((t) => t.b === "like").slice(0, 2).map((t) => t.l),
+    dk: o.dislike.map((x) => x.n), sp: o.eps.filter((e) => e.k === "급증").length, dr: o.eps.filter((e) => e.k === "급감 직전").length,
+    sum: (o.analysis && o.analysis.summary) || "" };
+}
 writeFileSync(idxPath, JSON.stringify(index));
 console.log(`사이트용 댓글 분석 ${wrote}작품 내보냄 → ${DIR} (목록 ${Object.keys(index.works).length}작품)`);
