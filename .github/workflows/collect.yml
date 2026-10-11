@@ -21,8 +21,11 @@ jobs:
   collect:
     runs-on: ubuntu-latest
     steps:
+      # ref: main = 작업이 실제로 시작할 때의 최신 main. (기본값은 예약이 걸린 순간의 커밋이라, 앞 수집이 끝나길 기다렸다 시작해도 옛 데이터를 보고
+      # 가드를 통과해 한 번 더 돌고, 그 사이 올라간 성인 수집 결과를 덮었음 — 2026-10-11)
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 30   # 가드가 최근 커밋 이력을 확인(오늘 이미 수집됐는지)
       - name: 오늘 이미 수집됐는지 확인 (예약 실행만 스킵, 수동은 항상 실행)
         id: guard
@@ -45,6 +48,8 @@ jobs:
         run: |
           git config user.name "ehgowjd1-afk"
           git config user.email "ehgowjd1@gmail.com"
+          # 수집하는 동안 다른 수집(성인·로컬)이 먼저 올린 값을 덮지 않게 원격과 합친 뒤 올림(날짜 도장이 새로운 쪽, 빈 칸 채움)
+          git fetch -q origin main && node scripts/merge_remote.js origin/main || echo "원격 합치기 실패 — 그대로 올림"
           git add docs/data/weekday.json docs/data/genre.json docs/data/series.json docs/data/promo.json docs/data/series_details.json docs/data/series_extra.json docs/data/revenue_history.json docs/data/ep_history.json docs/data/fav_history.json docs/data/lookup.json docs/data/details.json docs/data/history.json docs/data/episodes docs/data/episodes_index.json docs/data/ep_counts docs/data/cmt_history.json
           if git diff --cached --quiet; then
             echo "변경 없음 — 스킵"; exit 0
