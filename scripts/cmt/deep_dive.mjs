@@ -140,7 +140,8 @@ const CHECK_SYSTEM = `당신은 사실 확인 담당입니다. 다른 AI가 웹�
 - 작품 소개의 인물 정보(이름·직업·관계)와 어긋나면 틀린 것입니다.
 - 회차 번호는 근거 댓글이 달린 회차(괄호 안 제목)와 맞아야 합니다.
 
-fix일 때: 칸(이름·내용·반응)이면 name·detail·react에, 한 줄 평이나 마무리 문장이면 line에 고친 문장을 쓰고 나머지는 빈 문자열. ok·drop이면 모두 빈 문자열.
+fix일 때: 칸이면 name·detail·react 세 칸을 모두 다시 씁니다(이름에 틀린 내용이 들어 있으면 이름도 고치고, 바뀌지 않는 칸도 그대로 다시 씀). 한 줄 평이나 마무리 문장이면 line에 고친 전체 문장. 나머지는 빈 문자열. ok·drop이면 모두 빈 문자열.
+고친 문장에 '분명하지 않다', '확인되지 않는다' 같은 단서를 달지 말고, 근거로 확인되는 내용만 남겨 씁니다. 남길 내용이 없으면 drop.
 고친 문장도 댓글 문장을 그대로 옮기지 않고 요약합니다. 쉬운 한국어로.`;
 function checkText(w) {
   const det = N.workInfo(w.id);
@@ -245,7 +246,7 @@ try {
             report.checkFix++;
             if (it.kind === "line") { if (x.line) it.line = x.line; }
             else if (it.kind === "insight") { if (x.line) it.insight = x.line; }
-            else { if (x.name) it.name = x.name; if (x.detail) it.detail = x.detail; if (x.react) it.react = x.react; }
+            else { if (!x.name || !x.detail) { report.checkDrop++; report.checkFix--; return false; } it.name = x.name; it.detail = x.detail; if (x.react) it.react = x.react; }   // 고칠 때 이름·내용을 다 안 주면 버림(틀린 이름이 남지 않게)
           } else report.checkOk++;
           return true;
         });
