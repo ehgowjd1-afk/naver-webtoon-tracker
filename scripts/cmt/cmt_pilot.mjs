@@ -28,9 +28,9 @@ const STATE = "state/ai_state.json";
 const OUT = "cmt_out";
 const HAIKU = { model: "claude-haiku-5-5", effort: "medium" };
 const SONNET = { model: "claude-sonnet-5-5", effort: "medium" };
-const EST_PER_COMMENT = 0.0001;   // 2단계: 댓글 1개당 예상(일괄, 여유 있게)
-const EST_THEME_WORK = 0.15;      // 1단계: 작품 1개당 예상
-const EST_NEEDS_WORK = 0.15;      // 3단계: 작품 1개당 예상
+const EST_PER_COMMENT = 0.00009;  // 2단계+불호 재확인: 댓글 1개당 예상(시범 실측 0.000067에 여유 30%)
+const EST_THEME_WORK = 0.1;       // 1단계: 작품 1개당 예상(실측 0.078)
+const EST_NEEDS_WORK = 0.1;       // 3단계: 작품 1개당 예상(실측 0.082)
 const EST_RECHECK_PER = 0.0006;   // 불호 재확인: 댓글 1개당 예상(Sonnet)
 const MOCK = !!process.env.CMT_MOCK;
 
