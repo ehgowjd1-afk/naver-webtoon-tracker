@@ -241,7 +241,7 @@ try {
       w.cast = (p.cast || []).map((c) => ({ name: c.name, role: c.role, al: [...new Set([c.name, ...(c.aliases || [])].map((a) => String(a || "").trim()).filter((a) => a.length >= 2))] })).filter((c) => c.al.length);
       w.items = [];
       for (const x of p.lines || []) { if (!LK.test(x.key)) continue; const refs = okRefs(x); if (refs.length < MIN_REFS) { report.dropped++; continue; } w.items.push({ key: x.key, kind: "line", line: x.line, refs }); }
-      const PK = /^(ID|Sd+|Wd+|RP|RWd+|RSd+|RC)$/;   // 항목 번호가 아닌 key(예: 묶음 T3를 항목으로 씀)는 버림 — 한 줄 평과 섞여 정리 단계가 멈췄음(2026-10-12)
+      const PK = /^(ID|S\d+|W\d+|RP|RW\d+|RS\d+|RC)$/;   // 항목 번호가 아닌 key(예: 묶음 T3를 항목으로 씀)는 버림 — 한 줄 평과 섞여 정리 단계가 멈췄음(2026-10-12)
       for (const pt of p.points || []) {
         if (!PK.test(pt.key)) continue;
         const all = [];
