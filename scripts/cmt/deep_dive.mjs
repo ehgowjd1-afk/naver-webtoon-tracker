@@ -241,7 +241,9 @@ try {
       w.cast = (p.cast || []).map((c) => ({ name: c.name, role: c.role, al: [...new Set([c.name, ...(c.aliases || [])].map((a) => String(a || "").trim()).filter((a) => a.length >= 2))] })).filter((c) => c.al.length);
       w.items = [];
       for (const x of p.lines || []) { if (!LK.test(x.key)) continue; const refs = okRefs(x); if (refs.length < MIN_REFS) { report.dropped++; continue; } w.items.push({ key: x.key, kind: "line", line: x.line, refs }); }
+      const PK = /^(ID|Sd+|Wd+|RP|RWd+|RSd+|RC)$/;   // 항목 번호가 아닌 key(예: 묶음 T3를 항목으로 씀)는 버림 — 한 줄 평과 섞여 정리 단계가 멈췄음(2026-10-12)
       for (const pt of p.points || []) {
+        if (!PK.test(pt.key)) continue;
         const all = [];
         for (const x of pt.parts || []) { const refs = okRefs(x); if (refs.length < MIN_REFS) { report.dropped++; continue; } all.push(...refs); w.items.push({ key: pt.key, kind: "part", name: x.name, detail: x.detail, react: x.react, refs }); }
         if (pt.insight && all.length) w.items.push({ key: pt.key, kind: "insight", insight: pt.insight, refs: [...new Set(all)].slice(0, 10) });
@@ -363,6 +365,7 @@ try {
       const cs = it.refs.map((n) => w.num.get(n)), meta = { n: it.refs.length, lk: cs.reduce((t, c) => t + c.like, 0) };
       if (it.kind === "line") { o[it.key] = { line: sc(it.line), ...meta }; report.kept++; continue; }
       const epc = {}; for (const c of cs) epc[c.no] = (epc[c.no] || 0) + 1;
+      if (o[it.key] && !o[it.key].parts) continue;
       (o[it.key] ||= { parts: [], insight: "" }).parts.push({ name: sc(it.name), detail: sc(it.detail), react: sc(it.react),
         eps: Object.entries(epc).sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, 4).map(([no]) => Number(no)).sort((a, b) => a - b), ...meta });
       report.kept++;
