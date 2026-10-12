@@ -164,12 +164,12 @@ function titlesOf(w) {
   for (const d of w.cm.dislike || []) title[DKEY[d.k]] = `불호: ${d.l}`;
   return title;
 }
-function checkText(w, second) {
+function checkText(w, second, subset) {
   const det = N.workInfo(w.id), title = titlesOf(w);
   const epl = new Map(w.cm.eps.map((e) => [e.no, e.l || `${e.no}번`]));
   const ev = (refs) => refs.map((n) => { const c = w.num.get(n); return `#${n} (${epl.get(c.no)}) [${c.like}] ${clip(c.text, 160)}`; }).join("\n    ");
   const lines = [`[작품] ${w.cm.title}`, `[작품 소개] ${clip(det.desc || "-", 300)}`, `[주요 인물] ${(w.cast || []).map((c) => `${c.name}(${c.role}: ${c.al.join("·")})`).join(" / ") || "-"}`, "", "[확인할 항목] K번호 (어느 칸) 문장 / 근거 댓글"];
-  for (const it of w.items.filter((x) => !second || x.need)) {
+  for (const it of subset || w.items.filter((x) => !second || x.need)) {
     const body = it.kind === "line" ? `한 줄 평: ${it.line}` : it.kind === "insight" ? `마무리 문장: ${it.insight}` : `이름: ${it.name} / 내용: ${it.detail} / 반응: ${it.react}`;
     lines.push(`${it.k} [${it.key} ${title[it.key] || ""}] (${it.kind === "part" ? "칸" : it.kind === "line" ? "한 줄 평" : "마무리"}) ${body}`, `    ${ev(it.refs)}`);
     if (it.kwShown) lines.push(`    추가로 찾은 댓글(그 회차 공감순 상위 500개 중 '${it.kwShown.join("·")}' 포함 — 누구 얘기인지 이걸로 확인):`, (it.extra || []).length ? `    ${ev(it.extra)}` : "    (찾은 댓글 없음)");
@@ -278,19 +278,29 @@ try {
       return true;
     });
   };
+  // 확인할 칸을 40개씩 나눠 보냄 — 큰 작품은 칸이 150개를 넘어 답이 길어지다 끊겨, 판정을 못 받은 칸이 통째로 버려졌음(2026-10-12 참교육·시든 꽃에 눈물을 등)
+  const CHECK_CHUNK = 40;
   const checkStage = async (label, key, list, second) => {
     if (!list.length) return;
-    await stage(label, list.map((w) => ({ custom_id: `${second ? "e" : "c"}-${works.indexOf(w)}`, params: { model: SONNET.model, max_tokens: 32000, system: CHECK_SYSTEM,
-        messages: [{ role: "user", content: checkText(w, second) + "\n\n항목마다 판정해 JSON으로 쓰세요." }], output_config: { format: { type: "json_schema", schema: CHECK_SCHEMA }, effort: SONNET.effort } } })),
-      list.length * (second ? EST_CHECK / 3 : EST_CHECK), key, (res) => {
+    const reqs = [];
+    for (const w of list) {
+      const todo = w.items.filter((x) => !second || x.need);
+      for (let c = 0; c * CHECK_CHUNK < todo.length; c++) reqs.push({ custom_id: `${second ? "e" : "c"}-${works.indexOf(w)}-${c}`, params: { model: SONNET.model, max_tokens: 32000, system: CHECK_SYSTEM,
+        messages: [{ role: "user", content: checkText(w, second, todo.slice(c * CHECK_CHUNK, (c + 1) * CHECK_CHUNK)) + "\n\n항목마다 판정해 JSON으로 쓰세요." }], output_config: { format: { type: "json_schema", schema: CHECK_SCHEMA }, effort: SONNET.effort } } });
+    }
+    await stage(label, reqs, list.length * (second ? EST_CHECK / 3 : EST_CHECK), key, (res) => {
         let usd = 0;
+        const verdicts = new Map();   // 작품별로 모든 묶음의 판정을 모은 뒤 한 번에 반영(판정을 못 받은 칸은 버림)
         for (const [cid, r] of res) {
           const w = works[Number(cid.split("-")[1])];
-          if (!w || r.type !== "succeeded") { report.notes.push(`${label} 실패 — 확인 안 된 칸은 올리지 않음: ${w ? w.cm.title : cid}`); if (w) w.items = second ? w.items.filter((it) => !it.need) : []; continue; }
+          if (!w) continue;
+          if (!verdicts.has(w)) verdicts.set(w, { items: [] });
+          if (r.type !== "succeeded") { report.notes.push(`${label} 일부 실패 — 그 칸들은 올리지 않음: ${w.cm.title}`); continue; }
           usd += costOf(SONNET.model, r.message.usage || {});
-          let p; try { p = parseJson(r.message); } catch (e) { report.notes.push(`${label} 해석 실패 — 올리지 않음: ${w.cm.title}`); w.items = second ? w.items.filter((it) => !it.need) : []; continue; }
-          applyCheck(w, p, second);
+          let p; try { p = parseJson(r.message); } catch (e) { report.notes.push(`${label} 일부 해석 실패 — 그 칸들은 올리지 않음: ${w.cm.title}`); continue; }
+          verdicts.get(w).items.push(...(p.items || []));
         }
+        for (const [w, p] of verdicts) applyCheck(w, p, second);
         return usd;
       });
   };
