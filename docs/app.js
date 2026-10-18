@@ -68,7 +68,7 @@ const SOURCES = {
   promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_MIN, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
   revenue: { label:"매출순", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revenue:1,badge:1}, filters:F_MIN, sorts:[["per","회차당순"],["total","총거래액순"],["deal","주단위거래액순"]], note:()=>`시리즈 거래 추정 · 단가=(대여×0.9+소장×0.1)×100 · 총거래액=다운수×단가 · 회차당=총거래액×0.9×0.6÷시리즈 회차수 · 주단위거래액=이번주−지난주 누적` },
   revchange:{ label:"매출 변동", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revchange:1,badge:1}, filters:F_MIN, sorts:[["gain","거래액 많은 순"],["loss","적은 순"]], note:()=>`주단위 거래액 · ${revWeekLabel()} · 이번주−지난주 누적 거래액 (연재요일 기준)` },
-  newworks:{ label:"신작", variants:null, subs:()=>NEWSUBS, data:(v,s)=>newWorkSet(+s), caps:{revenue:1,badge:1,newworks:1}, filters:F_MIN, sorts:[["recent","최신순"],["per","회차당순"],["total","총거래액순"]], note:s=>`런칭 최근 ${s}일 신작 · ${s}일 지나면 이 목록에서만 빠지고 데이터는 계속 쌓여요` },
+  newworks:{ label:"신작", variants:null, subs:()=>NEWSUBS, data:(v,s)=>newWorkSet(+s), caps:{revenue:1,badge:1,newworks:1,newtiles:1}, filters:F_MIN, sorts:[["deal","주간 거래액순"],["dgain","상승폭순"],["recent","최신순"],["per","회차당순"],["total","총거래액순"]], note:()=>`런칭 최근 ${sub}일 신작 · 주간 거래액=그 주(연재요일 기준) 다운로드 증가×단가 · 상승·하락=전주 대비 · 기간 지나면 이 목록에서만 빠져요` },
 };
 const REVSUBS=[["전체","전체"],["adult","🔞성인"],["dailyplus","매일+"],["mon","월"],["tue","화"],["wed","수"],["thu","목"],["fri","금"],["sat","토"],["sun","일"]];
 /* 성인(19금) 작품만: 웹툰 자체의 성인 플래그(details.adult = comic.naver가 막는 19금 웹툰). 새 성인신작 감지되면 매일 자동 추가 */
@@ -99,7 +99,7 @@ function revenueWorkSet(s){
   return WEEKDAY.web[s]||[];
 }
 /* 신작: details.launch(런칭일 "YY.MM.DD") 최근 N일 이내 웹툰. 지나면 목록에서만 빠지고 데이터는 유지 */
-const NEWSUBS=[["30","최근 1달"],["60","2달"],["90","3달"]];
+const NEWSUBS=[["42","6주"],["30","최근 1달"],["60","2달"],["90","3달"]];
 function parseLaunch(s){ const m=String(s||"").match(/(\d{2})\.(\d{2})\.(\d{2})/); return m?new Date(2000+ +m[1], +m[2]-1, +m[3]).getTime():0; }
 function newWorkSet(days){
   if(!DETAILS||!LOOKUP.id) return [];
@@ -272,7 +272,7 @@ function weeklyRevenue(name, dow, weekSel, selfPn){
     lag = end < B;
   }
   const cur=weeks[idx], prev=idx>=1?weeks[idx-1]:null;
-  return { rev:cur.rev, perRev:cur.perRev, deal:cur.deal, ep:cur.ep, ws:cur.ws, we:cur.we, prev,
+  return { rev:cur.rev, perRev:cur.perRev, deal:cur.deal, dDl:cur.dDl, ep:cur.ep, ws:cur.ws, we:cur.we, prev,
     delta: prev?cur.rev-prev.rev:null, perDelta: prev?cur.perRev-prev.perRev:null, dealDelta: prev?cur.deal-prev.deal:null,
     sortKey: cur.deal, hasPrev:!!prev,
     est: !!cur.est, estDelta: !!(cur.est || (prev && prev.est)),   // 경계일 보간 포함 여부(이번주 / 전주대비)
@@ -452,7 +452,7 @@ function selectSrc(k){
   if(k==="appgenre" && !AGEN){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureAgen().then(()=>{ if(src!=="appgenre") return; document.getElementById("gwsel").style.display=(AGEN_IDX&&AGEN_IDX.weeks.length>1)?"":"none"; renderSubnav(); renderView(); }); return; }
   if(k==="promo" && !PROMO){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensurePromo().then(()=>renderView()); return; }
   if(k==="genre" && !DETAILS){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureDetails().then(()=>{ if(src==="genre") renderView(); }); return; }
-  if((k==="revenue"||k==="newworks"||k==="revchange"||k==="done") && (!SERIES||!SERIESDET||!DETAILS||(k==="revchange"&&!REVHIST))){ document.getElementById("board").innerHTML=`<li class="empty">${k==="newworks"?"신작":k==="revchange"?"매출 변동":k==="done"?"완결":"매출"} 데이터 불러오는 중…</li>`; Promise.all([ensureSeries(),ensureSeriesDetails(),ensureDetails(),ensureRevHist()]).then(()=>{ SNAMEIDX=null; renderView(); }); return; }
+  if((k==="revenue"||k==="newworks"||k==="revchange"||k==="done") && (!SERIES||!SERIESDET||!DETAILS||((k==="revchange"||k==="newworks")&&!REVHIST))){ document.getElementById("board").innerHTML=`<li class="empty">${k==="newworks"?"신작":k==="revchange"?"매출 변동":k==="done"?"완결":"매출"} 데이터 불러오는 중…</li>`; Promise.all([ensureSeries(),ensureSeriesDetails(),ensureDetails(),ensureRevHist()]).then(()=>{ SNAMEIDX=null; renderView(); }); return; }
   if(k==="series") setupSeriesCtl();
   renderView();
 }
@@ -481,10 +481,10 @@ function renderView(){
   const S=SOURCES[src], caps=S.caps;
   renderRevWsel();   // 매출변동 주 선택 드롭다운(요일 서브에서만) — revWeek 확정 후 meta/list
   document.getElementById("meta").innerHTML=`${esc(S.note(variant))} · <b>${esc(subLabel(sub))}</b>`;
-  document.getElementById("tiles").hidden=!caps.tiles;
+  document.getElementById("tiles").hidden=!(caps.tiles||caps.newtiles);
   document.getElementById("panels").hidden=!caps.tiles;
   document.getElementById("gapPanel").hidden=!caps.gap;
-  if(caps.tiles) renderStats();
+  if(caps.tiles) renderStats(); else if(caps.newtiles) renderNewTiles();
   if(caps.gap) renderGap();
   renderControls();
   renderList();
@@ -519,6 +519,25 @@ function renderStats(){
   const gtot=AL.length||1, pc=n=>Math.round(n/gtot*100);
   document.getElementById("distbar").innerHTML=`<span style="background:var(--down);width:${mo/gtot*100}%"></span><span style="background:var(--same);width:${bo/gtot*100}%"></span><span style="background:var(--up);width:${fo/gtot*100}%"></span>`;
   document.getElementById("distleg").innerHTML=`<span><i style="background:var(--down)"></i>남성순위 <b>${pc(mo)}%</b></span><span><i style="background:var(--same)"></i>동시 <b>${pc(bo)}%</b></span><span><i style="background:var(--up)"></i>여성순위 <b>${pc(fo)}%</b></span>`;
+}
+/* 신작 요약 타일 — 지금 보는 기간(6주 등) 신작 중 주간 거래액 1위 · 전주 대비 최대 상승/하락 · 상승률 1위 */
+function renderNewTiles(){
+  const rows=viewRows().map(d=>({d, wr:weeklyRevenue(d.name, dowOf(d), "")})).filter(x=>x.wr);
+  const day=d=>{ const lt=parseLaunch(DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch); return lt?Math.floor((Date.now()-lt)/86400000)+1:null; };
+  const pick=(arr,f)=>arr.filter(x=>f(x)!=null&&isFinite(f(x))).sort((a,b)=>f(b)-f(a))[0];
+  const best=pick(rows,x=>x.wr.deal>0?x.wr.deal:null);
+  const up=pick(rows,x=>x.wr.dealDelta>0?x.wr.dealDelta:null);
+  const dn=pick(rows,x=>x.wr.dealDelta<0?-x.wr.dealDelta:null);
+  const rate=x=>(x.wr.prev&&x.wr.prev.deal>=1e6&&x.wr.dealDelta>0)?x.wr.dealDelta/x.wr.prev.deal:null;   // 전주 100만 원 이상인 작품만(작은 기준값 착시 방지)
+  const rt=pick(rows,rate);
+  const nm=x=>x?esc(x.d.name):"—", dd=x=>(x&&day(x.d))?` · 론칭 ${day(x.d)}일차`:"";
+  const tiles=[
+    {lab:"💰 주간 거래액 1위",cls:"acc",big:nm(best),sub:best?`${wonFmt(best.wr.deal)}${dd(best)}`:"아직 한 주가 안 쌓였어요"},
+    {lab:"▲ 최대 상승 (전주 대비)",cls:"up",big:nm(up),sub:up?`▲${wonFmt(up.wr.dealDelta)} · 이번주 ${wonFmt(up.wr.deal)}`:"2주 이상 쌓인 작품 없음"},
+    {lab:"▼ 최대 하락 (전주 대비)",cls:"down",big:nm(dn),sub:dn?`▼${wonFmt(-dn.wr.dealDelta)} · 이번주 ${wonFmt(dn.wr.deal)}`:"하락한 작품 없음"},
+    {lab:"📈 상승률 1위",cls:"up",big:nm(rt),sub:rt?`+${Math.round(rate(rt)*100)}% · 이번주 ${wonFmt(rt.wr.deal)}${dd(rt)}`:"전주 100만 원 이상 중 상승 없음"}
+  ];
+  document.getElementById("tiles").innerHTML=tiles.map(t=>`<div class="tile"><div class="lab">${t.lab}</div><div class="big ${t.cls}">${t.big}</div><div class="sub2">${esc(t.sub)}</div></div>`).join("");
 }
 function renderGap(){
   if(!APP) return;
@@ -575,6 +594,11 @@ function renderList(){
     rows=[...rows].sort((a,b)=>fv(b)-fv(a));
     rows.forEach((d,i)=>{ d._rk=i+1; });
   }
+  else if(caps.newworks && sMode==="dgain"){   // 전주 대비 주간 거래액 증가 큰 순(2주 미만 작품은 뒤로)
+    rows.forEach(d=>{ d._wd=weeklyRevenue(d.name, dowOf(d), ""); });
+    const g=d=>(d._wd&&d._wd.dealDelta!=null)?d._wd.dealDelta:-Infinity;
+    rows=[...rows].sort((a,b)=>g(b)-g(a)); rows.forEach((d,i)=>{ d._rk=i+1; });
+  }
   else if(caps.revenue && sMode==="recent"){
     const lt=d=>parseLaunch(DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch);
     rows=[...rows].sort((a,b)=>lt(b)-lt(a));
@@ -604,7 +628,7 @@ function renderList(){
     return `<li class="rowli ${rk<=3?"top"+rk:""}" role="button" tabindex="0" data-i="${i}">
       <div class="rk tnum">${rk}</div>${thumb}
       <div class="cell"><div class="ttl"><span class="name">${esc(d.name)}</span>${badgeHtml(d)}</div><div class="auth">${esc(d.a)}${caps.done&&DETAILS&&DETAILS[d.id]?` · <span style="color:var(--muted)">${esc(DETAILS[d.id].day||"")}${DETAILS[d.id].fav?" · 관심 "+DETAILS[d.id].fav.toLocaleString():""}</span>`:""}${caps.newworks&&DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch?` · <span style="color:var(--accent)">🆕 ${esc(DETAILS[d.id].launch)}</span>`:""}</div></div>
-      ${caps.revchange ? revChangeHtml(d) : showRev ? revHtml(d) : (caps.move?moveHtml(d.m):"")}
+      ${(caps.revchange || (caps.newworks && (sMode==="deal"||sMode==="dgain"))) ? revChangeHtml(d) : showRev ? revHtml(d) : (caps.move?moveHtml(d.m):"")}
     </li>`;
   }).join("");
 }
