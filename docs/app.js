@@ -61,7 +61,8 @@ const SOURCES = {
   appgenre:{ label:"앱 장르 주간", variants:null, subs:()=>((AGEN_IDX&&AGEN_IDX.genres)||AGEN_GENRES).map(k=>[k,String((AGEN&&AGEN.charts&&AGEN.charts[k]||[]).length)]), data:(v,s)=>AGEN&&AGEN.charts&&AGEN.charts[s], caps:{move:1,streak:1,badge:1}, filters:F_APP, sorts:S_APP.filter(x=>x[0]!=="revenue"), note:()=>AGEN&&AGEN.date?`${weekLabel(AGEN.date)} · 앱 「${sub} 웹툰 주간랭킹」 · ${AGEN.src&&AGEN.src[sub]==="phone"?"앱 화면 100위(폰)":"검색 위젯 45위 · 순위변동은 폰 수집 때만"}`:"앱 장르 주간랭킹 · 아직 데이터 없음" },
   // 앱 = 폰으로 읽은 실제 앱 인기순(예전 '모바일'은 m.comic 모바일 웹이라 앱과 순서가 달라서 뺌)
   weekday: { label:"요일별", variants:[["app","앱"],["web","웹"]], subs:()=>variant==="app"?APPWD_SUBS:WEEKDAYS, data:(v,s)=>v==="app"?(APPWD&&APPWD.tabs&&APPWD.tabs[s]):(WEEKDAY&&WEEKDAY.web&&WEEKDAY.web[s]), caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>v==="app"?(APPWD&&APPWD.date?`${dot((APPWD.tabDates&&APPWD.tabDates[sub])||APPWD.date)} · 앱 인기순(폰 화면) · 매일`:"앱 인기순 · 아직 데이터 없음"):`${dot(WEEKDAY.date)} · 요일별 인기순 · 웹(PC) · 자동` },
-  genre:   { label:"장르", variants:[["app","모바일"],["web","웹"]], subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE[v]&&notDone(GENRE[v][s]), caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>`${dot(GENRE.date)} · 장르별 인기순 · ${v==="app"?"모바일":"웹(PC)"} · 자동 · 완결작은 완결 탭으로 옮김(순위 번호는 네이버 원래 순위)` },
+  // 웹(PC)만 — m.comic 모바일 장르는 2026-10-18부터 안 받음(앱 장르 순위는 '앱 장르 주간' 탭)
+  genre:   { label:"장르", variants:null, subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE.web&&notDone(GENRE.web[s]), caps:{badge:1}, filters:F_MIN, sorts:[], note:()=>`${dot(GENRE.date)} · 장르별 인기순 · 웹(PC) · 자동 · 완결작은 완결 탭으로 옮김(순위 번호는 네이버 원래 순위)` },
   done:    { label:"완결", variants:null, subs:()=>doneSubs(), data:(v,s)=>doneWorkSet(s), caps:{revenue:1,badge:1,done:1}, filters:F_MIN, sorts:[["fav","관심수순"],["total","총거래액순"],["per","회차당순"]], note:()=>`완결된 웹툰 · 장르·신작·성인 목록에서 옮겨 왔어요` },
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][platform]&&SERIES[v][platform][scat]&&SERIES[v][platform][scat][s], caps:{move:1,tiles:1,series:1,badge:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · ${platform==="web"?"웹(PC)":"모바일"} · ${scat} · 자동` },
   promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_MIN, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
@@ -686,7 +687,7 @@ function crossBasisHtml(d, isSeries){
     if(AGEN&&AGEN.charts) for(const g in AGEN.charts){ const r=findRank(AGEN.charts[g],false); if(r) E.push([`앱 장르 주간 ${g}`, `agen_${g}`, r]); }   // 앱 장르 탭을 한 번 연 뒤부터
     if(APPWD&&APPWD.tabs) for(const [w,wl] of APPWD_SUBS){ const r=findRank(APPWD.tabs[w],true); if(r) E.push([`요일 앱 ${wl}`, `awd_${w}`, r]); }
     for(const [w,wl] of WEEKDAYS){ const r=findRank(WEEKDAY.web&&WEEKDAY.web[w],true); if(r) E.push([`요일 웹 ${wl}`, `wd_web_${w}`, r]); }
-    for(const [g,gl] of GENRES) for(const v of ["web","app"]){ const r=findRank(GENRE[v]&&GENRE[v][g],true); if(r) E.push([`장르 ${v==="app"?"모바일":"웹"} ${gl}`, `gn_${v}_${g}`, r]); }
+    for(const [g,gl] of GENRES){ const r=findRank(GENRE.web&&GENRE.web[g],true); if(r) E.push([`장르 웹 ${gl}`, `gn_web_${g}`, r]); }
   }
   if(!E.length) return "";
   const rows=E.map(([label,key,rank])=>{
@@ -877,7 +878,7 @@ async function exportCSV(){
       for(const c of ["전체","여성","남성"]){ const r=findRank(APP&&APP.charts[c],false,d); if(r)E.push("앱"+c+r); }
       if(APPWD&&APPWD.tabs) for(const [w,wl] of APPWD_SUBS){ const r=findRank(APPWD.tabs[w],true,d); if(r)E.push("요일앱"+wl+r); }
       for(const [w,wl] of WEEKDAYS){ const r=findRank(WEEKDAY.web&&WEEKDAY.web[w],true,d); if(r)E.push("요일웹"+wl+r); }
-      for(const [g,gl] of GENRES) for(const v of ["web","app"]){ const r=findRank(GENRE[v]&&GENRE[v][g],true,d); if(r)E.push("장르"+(v==="app"?"모바일":"웹")+gl+r); }
+      for(const [g,gl] of GENRES){ const r=findRank(GENRE.web&&GENRE.web[g],true,d); if(r)E.push("장르웹"+gl+r); }
     }
     return E.join(" · ");
   };
