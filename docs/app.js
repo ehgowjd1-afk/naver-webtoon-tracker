@@ -11,7 +11,7 @@ let APP=null, WEEKDAY=null, GENRE=null, SERIES=null, PROMO=null, LOOKUP={id:{},n
 let AGEN=null, AGEN_IDX=null, agenLoading=null;   // 앱 장르 주간랭킹(data/app_genre/) — 탭 열 때 불러옴
 const AGEN_GENRES=["판타지·무협","액션","드라마","로맨스","스릴러","일상·개그"];
 let APPWD=null, APPWDH=null, appwdLoading=null;   // 앱 요일별 인기순(폰 화면, data/app_weekday*.json) — 요일별 › 앱
-const APPWD_SUBS=[["all","전체"], ...WEEKDAYS];
+const APPWD_SUBS=[["all","전체"], ["new","신작"], ...WEEKDAYS];
 let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="", revWeek="";
 let rowsCache=[];
 let DETAILS=null, detailsLoading=null, HISTORY=null, historyLoading=null, KWINDEX=null, seriesLoading=null, promoLoading=null;
@@ -914,7 +914,7 @@ function basisLabel(key){
   if(key.startsWith("app_")) return "앱주간 "+key.slice(4);
   if(key.startsWith("wd_web_")) return "요일 웹 "+(WDMAP[key.slice(7)]||key.slice(7));
   if(key.startsWith("wd_app_")) return "요일 모바일웹 "+(WDMAP[key.slice(7)]||key.slice(7));   // 예전 m.comic 기록(엑셀에만)
-  if(key.startsWith("awd_")) return "요일 앱 "+(key==="awd_all"?"전체":(WDMAP[key.slice(4)]||key.slice(4)));
+  if(key.startsWith("awd_")){ const t=key.slice(4), s=APPWD_SUBS.find(x=>x[0]===t); return "요일 앱 "+(s?s[1]:t); }
   if(key.startsWith("gn_web_")) return "장르 웹 "+(GNMAP[key.slice(7)]||key.slice(7));
   if(key.startsWith("gn_app_")) return "장르 모바일 "+(GNMAP[key.slice(7)]||key.slice(7));
   if(key.startsWith("series_comic_")||key.startsWith("series_novel_")){ const svc=key.startsWith("series_comic_")?"웹툰":"웹소설"; const parts=key.slice(13).split("_"); const p=parts.pop(); const pf=parts.join("_"); return "시리즈 "+svc+(pf?" "+(pf==="web"?"웹":pf==="mobile"?"모바일":pf):"")+" "+(PMAP[p]||p); }

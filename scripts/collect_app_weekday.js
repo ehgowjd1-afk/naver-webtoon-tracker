@@ -1,8 +1,9 @@
 /* 앱 요일별 인기순(전체·매일+·월~일)을 USB로 연결한 안드로이드 폰의 네이버웹툰 앱 화면에서 읽어 저장.
+ * 신작 탭도 같이(정렬은 탭마다 따로 — 신작은 원래 업데이트순).
  * 웹툰 탭 → 정렬을 '인기순'으로(끝나면 사용자가 쓰던 정렬로 되돌림) → 탭마다 끝까지 스크롤하며 3열 목록 글자를 읽음.
  * 목록은 '따끈따끈! 업데이트 매일+' 같은 구역 제목이 나오는 곳에서 끝남(그 아래 칸은 다른 구역).
  * m.comic(모바일 웹) 인기순과 실제 앱 순서는 다름(2026-10-18 목요일 같은 자리 8/110) → 사이트 '요일별 › 앱'은 이 데이터.
- * 저장: docs/data/app_weekday.json = {date, updated, tabDates:{탭:날짜}, tabs:{all|dailyPlus|mon..sun:[{r,t,a,id,th?,b[]}]}}
+ * 저장: docs/data/app_weekday.json = {date, updated, tabDates:{탭:날짜}, tabs:{all|new|dailyPlus|mon..sun:[{r,t,a,id,th?,b[]}]}}
  *       docs/data/app_weekday_history.json = {dates:[], series:{탭:{titleId:[순위…]}}} (최근 60일)
  *   node scripts/collect_app_weekday.js [--push] [--tabs=all,mon] [--dry] [--force]
  */
@@ -18,8 +19,11 @@ const PUSH = args.includes("--push"), DRY = args.includes("--dry"), FORCE = args
 const ONLY = ((args.find((a) => a.startsWith("--tabs=")) || "").slice(7)).split(",").filter(Boolean);
 const TODAY = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 const ALL_MAX = 500;   // 전체 탭은 2천 개가 넘어(28분) 상위 500위까지만
-const TABS = [["all", "전체"], ["dailyPlus", "매일+"], ["mon", "월요 연재"], ["tue", "화요 연재"], ["wed", "수요 연재"], ["thu", "목요 연재"], ["fri", "금요 연재"], ["sat", "토요 연재"], ["sun", "일요 연재"]];
+const TABS = [["all", "전체"], ["new", "신작"], ["dailyPlus", "매일+"], ["mon", "월요 연재"], ["tue", "화요 연재"], ["wed", "수요 연재"], ["thu", "목요 연재"], ["fri", "금요 연재"], ["sat", "토요 연재"], ["sun", "일요 연재"]];
 const TABNAMES = new Set(["전체", "신작", "매일+", "월요 연재", "화요 연재", "수요 연재", "목요 연재", "금요 연재", "토요 연재", "일요 연재", "완결"]);
+// 탭 줄 위치는 '신작'을 빼고 잡음 — 썸네일 위 '신작' 표시도 같은 이름이라서
+const ANCHORS = new Set([...TABNAMES].filter((x) => x !== "신작"));
+const barNodes = (nodes) => nodes.filter((n) => ANCHORS.has(n.d) && n.b.length);
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { return d; } };
 
 const sortNode = (nodes) => nodes.find((n) => / 기준으로 정렬$/.test(n.d) && n.b.length);
@@ -45,9 +49,10 @@ function openHome() {
 function selectTab(label) {
   for (let k = 0; k < 4; k++) {
     const nodes = dump();
-    const t = nodes.find((n) => n.d === label && n.b.length && n.b[2] - n.b[0] > 40 && n.b[0] >= 0 && n.b[2] <= 1080);
+    const bar = barNodes(nodes), rowY = bar.length ? bar[0].b[1] : -1;   // 탭 줄과 같은 줄에 있는 것만 탭으로 봄
+    const t = nodes.find((n) => n.d === label && n.b.length && n.b[1] === rowY && n.b[2] - n.b[0] > 40 && n.b[0] >= 0 && n.b[2] <= 1080);
     if (t) { tap(t.b); wait(2200); return true; }
-    const any = nodes.find((n) => TABNAMES.has(n.d) && n.b.length);
+    const any = bar[0];
     if (!any) { toTop(); continue; }
     const y = Math.round((any.b[1] + any.b[3]) / 2);
     if (k % 2 === 0) swipe(950, y, 150, y, 300); else swipe(150, y, 950, y, 300);   // 오른쪽 탭(금~일) ↔ 왼쪽 탭(전체)
@@ -70,7 +75,7 @@ function scrapeTab(max = Infinity) {
   const got = new Map(); let stale = 0, ended = false;
   for (let i = 0; i < 400 && !ended && stale < 3 && got.size < max; i++) {
     const nodes = dump();
-    const bar = nodes.filter((n) => TABNAMES.has(n.d) && n.b.length);
+    const bar = barNodes(nodes);
     const barY = bar.length ? Math.max(...bar.map((n) => n.b[3])) : 0;
     const head = nodes.find((n) => n.cls === "TextView" && n.t && n.b.length && n.b[1] > barY && n.b[1] < 2028 && n.b[2] - n.b[0] > 500);
     const endY = head ? head.b[1] : 99999; if (head) ended = true;
