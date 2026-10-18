@@ -5,68 +5,17 @@
  * 준비: 폰 개발자 옵션 → USB 디버깅 켬 + PC 허용. 화면 잠금(PIN·패턴)이 걸려 있으면 건너뜀 → 이 폰은 잠금 없음 + '충전 중 화면 켜짐 유지' 권장.
  *   node scripts/collect_app_phone.js [--push] [--genre=FANTASY,ROMANCE] [--dry]
  */
-const { execFileSync, execSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 const G = require("./lib/app_genre.cjs");
+const { PKG, adb, wait, log, dump, waitFocus, tap, swipe, back, toTop, dismissPopups, ensureReady, finish, fillIds, pushPaths } = require("./lib/adb_phone.cjs");
 
 const ROOT = path.join(__dirname, "..");
 const DIR = path.join(ROOT, "docs", "data", "app_genre");
-const ADB = process.env.ADB || (fs.existsSync("C:/Users/Desktop/platform-tools/adb.exe") ? "C:/Users/Desktop/platform-tools/adb.exe" : "adb");
-const PKG = "com.nhn.android.webtoon";
 const args = process.argv.slice(2);
 const PUSH = args.includes("--push"), DRY = args.includes("--dry");
 const ONLY = ((args.find((a) => a.startsWith("--genre=")) || "").slice(8)).split(",").filter(Boolean);
 const TODAY = G.kstToday();
-
-const adb = (...a) => execFileSync(ADB, a, { encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1" }, maxBuffer: 64 * 1024 * 1024, timeout: 90000 });
-const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const zw = (s) => String(s || "").replace(/\u200b/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#10;/g, " ");
-const log = (...a) => console.log(new Date(Date.now() + 9 * 3600e3).toISOString().slice(11, 19), ...a);
-
-// 트래커 목록(lookup)에 없는 작품(완결·장기 휴재 등) → 네이버웹툰 공개 검색으로 titleId·썸네일 찾기(이름 완전 일치만)
-async function searchTitle(name) {
-  try {
-    const r = await fetch(`https://comic.naver.com/api/search/all?keyword=${encodeURIComponent(name)}`, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/141.0 Safari/537.36", Referer: "https://comic.naver.com/" } });
-    const L = ((await r.json()).searchWebtoonResult || {}).searchViewList || [];
-    const hit = L.find((x) => G.norm(x.titleName) === G.norm(name));
-    return hit ? { id: hit.titleId, th: hit.thumbnailUrl || "" } : null;
-  } catch (e) { return null; }
-}
-
-function nodesOf(xml) {
-  return [...xml.matchAll(/<node [^>]*>/g)].map((m) => {
-    const n = m[0], b = (n.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/) || []).slice(1).map(Number);
-    return { cls: ((n.match(/class="([^"]*)"/) || [])[1] || "").split(".").pop(), d: zw((n.match(/content-desc="([^"]*)"/) || [])[1]), t: zw((n.match(/ text="([^"]*)"/) || [])[1]), b };
-  });
-}
-function dump() {
-  for (let i = 0; i < 4; i++) {
-    try { adb("shell", "uiautomator", "dump", "/sdcard/wt_ui.xml"); const x = adb("exec-out", "cat", "/sdcard/wt_ui.xml"); if (x.includes("<hierarchy")) return nodesOf(x); } catch (e) {}
-    wait(800);
-  }
-  throw new Error("화면 읽기(uiautomator dump) 실패");
-}
-const focus = () => ((adb("shell", "dumpsys", "window").match(/mCurrentFocus=Window\{[^}]*\}/) || [""])[0]);
-function waitFocus(re, ms = 10000) { const t = Date.now(); while (Date.now() - t < ms) { if (re.test(focus())) return true; wait(500); } return false; }
-const tap = (b) => adb("shell", "input", "tap", String(Math.round((b[0] + b[2]) / 2)), String(Math.round((b[1] + b[3]) / 2)));
-const swipe = (x1, y1, x2, y2, ms) => adb("shell", "input", "swipe", String(x1), String(y1), String(x2), String(y2), String(ms));
-const back = () => adb("shell", "input", "keyevent", "4");
-function toTop(n = 12) { for (let i = 0; i < n; i++) swipe(540, 500, 540, 2000, 100); wait(1200); }
-function dismissPopups(nodes) {   // 앱 안내 팝업("닫기")이 떠 있으면 닫음
-  const c = nodes.find((n) => /^닫기/.test(n.t || n.d) && n.b.length);
-  if (c) { tap(c.b); wait(1200); return true; }
-  return false;
-}
-
-function ensureReady() {
-  if (!/\tdevice\b/.test(adb("devices"))) throw new Error("폰이 연결돼 있지 않음(USB 디버깅 확인)");
-  if (!/mWakefulness=Awake/.test(adb("shell", "dumpsys", "power"))) { adb("shell", "input", "keyevent", "KEYCODE_WAKEUP"); wait(1500); }
-  const locked = () => /isKeyguardShowing=true|mDreamingLockscreen=true/.test(adb("shell", "dumpsys", "window"));
-  if (locked()) { swipe(540, 1800, 540, 500, 300); wait(1500); }
-  if (locked()) throw new Error("폰 화면이 잠겨 있음 — 잠금(PIN 등)을 풀어 두면 다음부터 수집");
-  if (!adb("shell", "pm", "list", "packages", PKG).includes(PKG)) throw new Error("네이버웹툰 앱이 설치돼 있지 않음");
-}
 
 // 작품 화면 열고 그 장르 랭킹 태그 누르기 → 랭킹 화면이면 true
 function openGenreRanking(label, ids) {
@@ -154,25 +103,19 @@ function scrapeRanking() {
   }
   try { ensureReady(); } catch (e) { log("건너뜀:", e.message); return; }
   let lookup = { name: {} }; try { lookup = JSON.parse(fs.readFileSync(path.join(ROOT, "docs", "data", "lookup.json"), "utf8")); } catch (e) {}
-  const nameId = {}; for (const k in lookup.name || {}) nameId[G.norm(k)] = lookup.name[k];
   const result = {};
   for (const [code, label] of G.GENRES) {
     if (ONLY.length && !ONLY.includes(code)) continue;
     try {
       let wl = []; try { wl = await G.fetchWidgetGenre(code); } catch (e) { log(`  위젯 실패(${e.message}) — 저장된 지난 순위로 작품 고름`); }
       const ids = wl.slice(0, 3).map((x) => x.id).filter(Boolean);
-      if (!ids.length) { try { const idx = JSON.parse(fs.readFileSync(path.join(DIR, "index.json"), "utf8")); const f = JSON.parse(fs.readFileSync(path.join(DIR, `${idx.latest}.json`), "utf8")); for (const x of (f.charts[label] || []).slice(0, 3)) { const id = x.id || nameId[G.norm(x.t)]; if (id) ids.push(id); } } catch (e) {} }
+      if (!ids.length) { try { const idx = JSON.parse(fs.readFileSync(path.join(DIR, "index.json"), "utf8")); const f = JSON.parse(fs.readFileSync(path.join(DIR, `${idx.latest}.json`), "utf8")); for (const x of (f.charts[label] || []).slice(0, 3)) { const id = x.id || (lookup.name || {})[x.t]; if (id) ids.push(id); } } catch (e) {} }
       log(`[${label}] 진입 작품 후보 ${ids.join(",") || "없음"}`);
       if (!ids.length || !openGenreRanking(label, ids)) { result[label] = "랭킹 화면 진입 실패"; continue; }
       const list = scrapeRanking();
       back(); wait(1200); back(); wait(1200);
       const wId = {}; for (const x of wl) wId[G.norm(x.t)] = x.id;
-      for (const x of list) { const id = wId[G.norm(x.t)] || nameId[G.norm(x.t)]; if (id) x.id = id; }
-      for (const x of list) {   // 사이트가 썸네일을 lookup에서 못 찾는 작품은 th를 같이 저장
-        if (x.id && lookup.id && lookup.id[x.id]) continue;
-        const h = await searchTitle(x.t); if (h) { x.id = h.id; if (h.th) x.th = h.th; }
-        await new Promise((r) => setTimeout(r, 120));
-      }
+      await fillIds(list, lookup, wId);
       const missing = Array.from({ length: Math.min(100, (list[list.length - 1] || {}).r || 0) }, (_, i) => i + 1).filter((r) => !list.some((x) => x.r === r));
       log(`  ${list.length}개 읽음${missing.length ? ` · 빠진 순위 ${missing.join(",")}` : ""} · 1위 ${list[0] ? list[0].t : "-"}`);
       if (list.length < 45) { result[label] = `읽은 수 부족(${list.length}) — 저장 안 함`; continue; }
@@ -182,15 +125,8 @@ function scrapeRanking() {
       result[label] = `${list.length}개 → ${r.week}`;
     } catch (e) { result[label] = "실패 " + e.message; log(`  실패: ${e.message}`); try { back(); back(); } catch (_) {} }
   }
-  try { adb("shell", "input", "keyevent", "KEYCODE_HOME"); adb("shell", "rm", "-f", "/sdcard/wt_ui.xml"); } catch (e) {}
+  finish();
   log("결과", JSON.stringify(result), `${((Date.now() - t0) / 60000).toFixed(1)}분`);
 
-  if (PUSH && !DRY && Object.values(result).some((v) => /→/.test(v))) {
-    try {
-      try { execSync(`git -C "${ROOT}" fetch -q origin main`, { stdio: "inherit" }); execSync(`node "${path.join(ROOT, "scripts", "merge_remote.js")}" origin/main`, { stdio: "inherit" }); } catch (e) { log("원격 합치기 실패 — 그대로 올림:", e.message); }
-      execSync(`git -C "${ROOT}" add docs/data/app_genre`, { stdio: "inherit" });
-      execSync(`git -C "${ROOT}" commit -m "local: 앱 장르 주간랭킹(폰) ${TODAY}"`, { stdio: "inherit" });
-      for (let i = 0; i < 3; i++) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); execSync(`git -C "${ROOT}" push origin main`, { stdio: "inherit" }); log("푸시 완료"); break; } catch (e) { log("재시도", i + 1); } }
-    } catch (e) { log("변경 없음/커밋 스킵"); }
-  }
+  if (PUSH && !DRY && Object.values(result).some((v) => /→/.test(v))) pushPaths(ROOT, ["docs/data/app_genre"], `local: 앱 장르 주간랭킹(폰) ${TODAY}`);
 })();
