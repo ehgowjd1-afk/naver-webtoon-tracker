@@ -458,7 +458,7 @@ async function collectEpisodes(details, updated){
 /* 순위 추이 누적: history.json = {dates:[...], series:{basisKey:{id:[rank aligned to dates]}}} (최근 45일) */
 function buildTodayBases(web_wd, app_wd, web_gn, app_gn, s_comic, s_novel){
   const b = {}, put = (key, arr) => { b[key] = Object.fromEntries((arr||[]).map(r => [r.id, r.r])); };
-  for(const w of WEEKDAYS){ put("wd_web_"+w, web_wd[w]); put("wd_app_"+w, app_wd[w]); }
+  for(const w of WEEKDAYS){ put("wd_web_"+w, web_wd[w]); put("wd_app_"+w, app_wd[w]); }   // app_wd는 이제 비어 있음 → 옛 모바일웹 기록은 빈 칸으로 날짜만 맞춰 가다 45일 뒤 사라짐
   for(const g of GENRES){ put("gn_web_"+g, web_gn[g]); put("gn_app_"+g, app_gn[g]); }
   for(const p of PERIODS){
     put("series_comic_web_"+p, s_comic.web["전체장르"]&&s_comic.web["전체장르"][p]);
@@ -649,7 +649,9 @@ if (require.main === module) (async ()=>{
   // 웹 먼저(lookup 채움) → 앱은 lookup 참조
   const web_wd = await webWeekday();
   const web_gn = await webGenre();
-  const [app_wd, app_gn, s_comic, s_novel] = await Promise.all([appWeekday(), appGenre(), seriesAll("comic"), seriesAll("novel")]);
+  // 요일별 m.comic(모바일 웹) 순위는 2026-10-18부터 안 받음 — 실제 앱 순위와 달라서, 사이트 요일별 › 앱은 폰 수집(collect_app_weekday.js)
+  const app_wd = {};
+  const [app_gn, s_comic, s_novel] = await Promise.all([appGenre(), seriesAll("comic"), seriesAll("novel")]);
   await fillMissingTitles([...Object.values(app_wd), ...Object.values(app_gn)]);   // 앱 랭킹에만 있는 작품 이름·썸네일
 
   let existingDetails = {};
