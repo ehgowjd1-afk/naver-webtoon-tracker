@@ -14,6 +14,7 @@ let APPWD=null, APPWDH=null, appwdLoading=null;
 let NTOP=[];   // 신작 탭 주간 거래액 TOP 10(요약 칸 아래)
 let LW=null, lwLoading=null;   // 신작 월별: data/launch_weeks.json(론칭 주차별 다운 증가, 클라우드가 매일 갱신·영구 보관)
 const CO_KEYS=[["w1","첫 주",1,false],["c2","2주 누적",2,true],["c4","4주 누적",4,true],["c8","8주 누적",8,true],["c12","12주 누적",12,true]];   // 앱 요일별 인기순(폰 화면, data/app_weekday*.json) — 요일별 › 앱
+const CO_SORTS=[["c2","2주 누적 거래액"],["w1","첫 주 거래액"],["c4","4주 누적 거래액"],["last","최근 주 거래액"],["keep","유지율"],["dl2","2주 다운로드"],["fav","관심 수"],["cmt","회차 댓글"],["app","앱 주간 순위"]];
 const APPWD_SUBS=[["all","전체"], ["new","신작"], ...WEEKDAYS];
 let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="", revWeek="";
 let rowsCache=[];
@@ -71,7 +72,7 @@ const SOURCES = {
   promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_MIN, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
   revenue: { label:"매출순", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revenue:1,badge:1}, filters:F_MIN, sorts:[["per","회차당순"],["total","총거래액순"],["deal","주단위거래액순"]], note:()=>`시리즈 거래 추정 · 단가=(대여×0.9+소장×0.1)×100 · 총거래액=다운수×단가 · 회차당=총거래액×0.9×0.6÷시리즈 회차수 · 주단위거래액=이번주−지난주 누적` },
   revchange:{ label:"매출 변동", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revchange:1,badge:1}, filters:F_MIN, sorts:[["gain","거래액 많은 순"],["loss","적은 순"]], note:()=>`주단위 거래액 · ${revWeekLabel()} · 이번주−지난주 누적 거래액 (연재요일 기준)` },
-  cohort:  { label:"신작 월별", variants:null, subs:()=>{ const ms=cohortMonths(); return ms.length?ms.map(m=>[m,monthLabel(m)]):[[isoToday().slice(0,7),"불러오는 중"]]; }, data:(v,s)=>cohortRows(s), caps:{cohort:1,badge:1}, filters:F_MIN, sorts:[["c2","2주 누적순"],["w1","첫 주순"],["c4","4주 누적순"],["c8","8주 누적순"],["c12","12주 누적순"]], note:()=>`론칭 월별 신작 성적 · 같은 시기(론칭 후 N주) 거래액 비교 · 매일 자동 갱신` },
+  cohort:  { label:"신작 월별", variants:null, subs:()=>{ const ms=cohortMonths(); return ms.length?ms.map(m=>[m,monthLabel(m)]):[[isoToday().slice(0,7),"불러오는 중"]]; }, data:(v,s)=>cohortRows(s), caps:{cohort:1,badge:1}, filters:F_MIN, sorts:CO_SORTS, note:()=>`론칭 월별 신작 성적 · 같은 시기(론칭 후 N주) 거래액 비교 · 아래 목록은 기준을 골라 그 달 순위 · 매일 자동 갱신` },
   newworks:{ label:"신작", variants:null, subs:()=>NEWSUBS, data:(v,s)=>newWorkSet(+s), caps:{revenue:1,badge:1,newworks:1,newtiles:1}, filters:F_MIN, sorts:[["deal","주간 거래액순"],["dgain","상승폭순"],["recent","최신순"],["per","회차당순"],["total","총거래액순"]], note:()=>`런칭 최근 ${sub}일 신작 · 주간 거래액=그 주(연재요일 기준) 다운로드 증가×단가 · 상승·하락=전주 대비 · 기간 지나면 이 목록에서만 빠져요` },
 };
 const REVSUBS=[["전체","전체"],["adult","🔞성인"],["dailyplus","매일+"],["mon","월"],["tue","화"],["wed","수"],["thu","목"],["fri","금"],["sat","토"],["sun","일"]];
@@ -141,11 +142,32 @@ function renderCohort(){
     <div class="cowrap"><table class="cotab"><thead><tr><th>론칭 월</th><th>작품</th>${cmpKeys.map(([,lab])=>`<th>${lab}</th>`).join("")}</tr></thead><tbody>${cmpRows}</tbody></table></div>
     <div class="nnote">거래액 = 론칭 후 그 기간 다운로드 증가 × 작품 단가 · 그 기간이 지난 작품만 셈 · 매일 자동 갱신, 주차 기록은 계속 보관 · 다운로드 기록이 2026-09-08부터라 그 전 론칭작은 없어요</div>`;
 }
+/* 월별 신작 순위 기준(정렬 칩). 거래액(론칭 주차) 외에 유지율·다운로드·관심 수·댓글·앱 주간 순위.
+   coMetric: 높을수록 좋은 값(앱 주간 순위만 낮을수록 → asc). 없으면 null = 목록 맨 아래 '–' */
+function coAppRank(d){ const f=c=>{ const r=(APP&&APP.charts&&APP.charts[c]||[]).find(x=>x.t===d.name); return r?r.r:null; }; return {all:f("전체"), f:f("여성"), m:f("남성")}; }
+function coMetric(d, k){
+  const x=LW&&LW.works[d.id], w=(x&&x.w)||[], det=DETAILS&&DETAILS[d.id];
+  if(d._co&&d._co[k]!==undefined) return d._co[k];   // 거래액 기준(w1·c2·c4·c8·c12)
+  if(k==="last"){ if(!w.length) return null; const sd=SERIESDET&&SERIESDET[x.pn], up=sd?unitPrice(sd,"comic"):320; return w[w.length-1]*up; }
+  if(k==="keep") return w.length>=2&&w[0]>=15000 ? w[w.length-1]/w[0] : null;   // 최근 주 ÷ 첫 주 — 첫 주 1.5만 건(약 480만 원) 미만은 작은 기준값 착시라 제외
+  if(k==="dl2") return w.length>=2 ? w[0]+w[1] : null;
+  if(k==="fav") return det&&det.fav ? det.fav : null;
+  if(k==="cmt") return det&&det.cmt!=null ? det.cmt : null;
+  if(k==="app"){ const a=coAppRank(d); return a.all; }
+  return null;
+}
 function cohortHtml(d){
-  const o=d._co||{}, k=sMode, lab=(CO_KEYS.find(x=>x[0]===k)||[])[1]||"";
-  if(o[k]==null) return `<div class="rev rev-none">${lab}<br>대기</div>`;
-  const others=CO_KEYS.filter(x=>x[0]!==k&&o[x[0]]!=null).slice(0,2).map(x=>x[1]+" "+wonShort(o[x[0]])).join(" · ");
-  return `<div class="rev" title="론칭 ${lab} 거래액"><span class="rev-full">${wonFmt(o[k])}</span><span class="rev-per">${others||lab}</span></div>`;
+  const k=sMode, v=coMetric(d,k), lab=(CO_SORTS.find(x=>x[0]===k)||[])[1]||"", o=d._co||{}, x=LW&&LW.works[d.id], w=(x&&x.w)||[];
+  const money=CO_KEYS.filter(c=>c[0]!==k&&o[c[0]]!=null).slice(0,2).map(c=>c[1]+" "+wonShort(o[c[0]])).join(" · ");
+  if(v==null){ if(k==="app"){ const a=coAppRank(d); if(a.f||a.m) return `<div class="rev"><span class="rev-full">전체 밖</span><span class="rev-per">${[a.f?"여성 "+a.f+"위":"",a.m?"남성 "+a.m+"위":""].filter(Boolean).join(" · ")}</span></div>`; } return `<div class="rev rev-none">${lab}<br>${k==="app"?"순위 밖":"대기"}</div>`; }
+  let big, small;
+  if(["w1","c2","c4","c8","c12","last"].includes(k)){ big=wonFmt(v); small=money||lab; }
+  else if(k==="keep"){ big=Math.round(v*100)+"%"; small=`${w.length}주차 ÷ 첫 주 다운(첫 주 1.5만 건 이상만)`; }
+  else if(k==="dl2"){ big=(v>=1e4?(v/1e4).toFixed(1)+"만":v.toLocaleString())+" 건"; small=`첫 주 ${w[0].toLocaleString()}건`; }
+  else if(k==="fav"){ big="관심 "+(v>=1e4?(v/1e4).toFixed(1)+"만":v.toLocaleString()); small=money||"관심 수(오늘)"; }
+  else if(k==="cmt"){ big="댓글 "+Math.round(v).toLocaleString(); small="최근 5화 평균"; }
+  else if(k==="app"){ const a=coAppRank(d); big=`전체 ${v}위`; small=[a.f?"여성 "+a.f+"위":"",a.m?"남성 "+a.m+"위":""].filter(Boolean).join(" · ")||"앱 「이번 주 웹툰 랭킹」"; }
+  return `<div class="rev" title="${esc(lab)}"><span class="rev-full">${big}</span><span class="rev-per">${esc(small)}</span></div>`;
 }
 function ensureLW(){ if(LW) return Promise.resolve(); if(!lwLoading) lwLoading=fetchJSON("data/launch_weeks.json").then(d=>{LW=d;}).catch(()=>{LW={works:{}};}); return lwLoading; }
 const GROUPS=[["naver","네이버웹툰",["app","appgenre","weekday","genre","revenue","newworks","cohort","revchange","done"]],["series","시리즈",["series","promo"]]];
@@ -677,9 +699,9 @@ function renderList(){
     return true;
   });
   if(caps.cohort){   // 신작 월별: 고른 기간(첫 주·N주 누적) 거래액 큰 순, 그 기간이 안 지난 작품은 뒤로
-    rows.forEach(d=>{ const x=LW&&LW.works[d.id]; d._co=x?cohortVals(x):{}; });
-    const v=d=>d._co[sMode]!=null?d._co[sMode]:-1;
-    rows=[...rows].sort((a,b)=>v(b)-v(a)); let rk=0; rows.forEach(d=>{ d._rk = d._co[sMode]!=null ? ++rk : "–"; });
+    rows.forEach(d=>{ const x=LW&&LW.works[d.id]; d._co=x?cohortVals(x):{}; d._cv=coMetric(d,sMode); });
+    const asc=sMode==="app", v=d=>d._cv!=null?d._cv:(asc?1e9:-1);   // 앱 주간 순위는 작은 순
+    rows=[...rows].sort((a,b)=>asc?v(a)-v(b):v(b)-v(a)); let rk=0; rows.forEach(d=>{ d._rk = d._cv!=null ? ++rk : "–"; });
   }
   else if(caps.revchange){
     rows=rows.map(d=>{ d._wr=weeklyRevenue(d.name, dowOf(d), revWeek); d._pend=!d._wr && revWeekPending(d.name, dowOf(d), revWeek); return d; }).filter(d=>d._wr||d._pend);
