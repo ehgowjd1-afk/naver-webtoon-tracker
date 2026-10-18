@@ -11,7 +11,9 @@ let APP=null, WEEKDAY=null, GENRE=null, SERIES=null, PROMO=null, LOOKUP={id:{},n
 let AGEN=null, AGEN_IDX=null, agenLoading=null;   // 앱 장르 주간랭킹(data/app_genre/) — 탭 열 때 불러옴
 const AGEN_GENRES=["판타지·무협","액션","드라마","로맨스","스릴러","일상·개그"];
 let APPWD=null, APPWDH=null, appwdLoading=null;
-let NTOP=[];   // 신작 탭 주간 거래액 TOP 10(요약 칸 아래)   // 앱 요일별 인기순(폰 화면, data/app_weekday*.json) — 요일별 › 앱
+let NTOP=[];   // 신작 탭 주간 거래액 TOP 10(요약 칸 아래)
+let LW=null, lwLoading=null;   // 신작 월별: data/launch_weeks.json(론칭 주차별 다운 증가, 클라우드가 매일 갱신·영구 보관)
+const CO_KEYS=[["w1","첫 주",1,false],["c2","2주 누적",2,true],["c4","4주 누적",4,true],["c8","8주 누적",8,true],["c12","12주 누적",12,true]];   // 앱 요일별 인기순(폰 화면, data/app_weekday*.json) — 요일별 › 앱
 const APPWD_SUBS=[["all","전체"], ["new","신작"], ...WEEKDAYS];
 let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="", revWeek="";
 let rowsCache=[];
@@ -69,6 +71,7 @@ const SOURCES = {
   promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_MIN, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
   revenue: { label:"매출순", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revenue:1,badge:1}, filters:F_MIN, sorts:[["per","회차당순"],["total","총거래액순"],["deal","주단위거래액순"]], note:()=>`시리즈 거래 추정 · 단가=(대여×0.9+소장×0.1)×100 · 총거래액=다운수×단가 · 회차당=총거래액×0.9×0.6÷시리즈 회차수 · 주단위거래액=이번주−지난주 누적` },
   revchange:{ label:"매출 변동", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revchange:1,badge:1}, filters:F_MIN, sorts:[["gain","거래액 많은 순"],["loss","적은 순"]], note:()=>`주단위 거래액 · ${revWeekLabel()} · 이번주−지난주 누적 거래액 (연재요일 기준)` },
+  cohort:  { label:"신작 월별", variants:null, subs:()=>{ const ms=cohortMonths(); return ms.length?ms.map(m=>[m,monthLabel(m)]):[[isoToday().slice(0,7),"불러오는 중"]]; }, data:(v,s)=>cohortRows(s), caps:{cohort:1,badge:1}, filters:F_MIN, sorts:[["c2","2주 누적순"],["w1","첫 주순"],["c4","4주 누적순"],["c8","8주 누적순"],["c12","12주 누적순"]], note:()=>`론칭 월별 신작 성적 · 같은 시기(론칭 후 N주) 거래액 비교 · 매일 자동 갱신` },
   newworks:{ label:"신작", variants:null, subs:()=>NEWSUBS, data:(v,s)=>newWorkSet(+s), caps:{revenue:1,badge:1,newworks:1,newtiles:1}, filters:F_MIN, sorts:[["deal","주간 거래액순"],["dgain","상승폭순"],["recent","최신순"],["per","회차당순"],["total","총거래액순"]], note:()=>`런칭 최근 ${sub}일 신작 · 주간 거래액=그 주(연재요일 기준) 다운로드 증가×단가 · 상승·하락=전주 대비 · 기간 지나면 이 목록에서만 빠져요` },
 };
 const REVSUBS=[["전체","전체"],["adult","🔞성인"],["dailyplus","매일+"],["mon","월"],["tue","화"],["wed","수"],["thu","목"],["fri","금"],["sat","토"],["sun","일"]];
@@ -109,7 +112,43 @@ function newWorkSet(days){
   out.sort((a,b)=>parseLaunch(DETAILS[b.id].launch)-parseLaunch(DETAILS[a.id].launch));
   return out;
 }
-const GROUPS=[["naver","네이버웹툰",["app","appgenre","weekday","genre","revenue","newworks","revchange","done"]],["series","시리즈",["series","promo"]]];
+/* 신작 월별: 론칭 월마다 같은 시기(첫 주·2주·4주·8주·12주 누적) 거래액 = 주차별 다운 증가 × 작품 단가 */
+const wonShort = v => v>=1e8 ? (v/1e8).toFixed(2).replace(/0+$/,"").replace(/[.]$/,"")+"억" : Math.round(v/1e4).toLocaleString()+"만";
+function cohortVals(x){
+  const sd=SERIESDET&&SERIESDET[x.pn], up=sd?unitPrice(sd,"comic"):320, w=x.w||[], o={};
+  for(const [k,,n,cum] of CO_KEYS) o[k] = w.length>=n ? (cum ? w.slice(0,n).reduce((s,v)=>s+v,0) : w[n-1])*up : null;
+  return o;
+}
+function cohortMonths(){ const s=new Set(); for(const id in (LW&&LW.works)||{}) s.add(LW.works[id].L.slice(0,7)); return [...s].sort().reverse(); }
+const monthLabel = m => { const p=m.split("-"); return `${+p[1]}월`+(m===isoToday().slice(0,7)?" (진행 중)":""); };
+function cohortRows(m){ const out=[]; for(const id in (LW&&LW.works)||{}){ const x=LW.works[id]; if(x.L.slice(0,7)===m) out.push({id:+id, t:x.t, r:0}); } return out; }
+function cohortStats(vals){
+  const a=vals.filter(v=>v!=null).sort((x,y)=>x-y); if(!a.length) return null;
+  const n=a.length, top=a.slice(-10);
+  return { n, mean:a.reduce((s,v)=>s+v,0)/n, med:n%2?a[(n-1)/2]:(a[n/2-1]+a[n/2])/2, q3:a[Math.floor(n*0.75)], top10:top.reduce((s,v)=>s+v,0)/top.length, max:a[n-1] };
+}
+function renderCohort(){
+  const el=document.getElementById("cohort"); if(!el||!LW) return;
+  const valsOf=m=>cohortRows(m).map(r=>LW.works[r.id]).map(cohortVals);
+  const cur=valsOf(sub);
+  const statRows=CO_KEYS.map(([k,lab])=>{ const st=cohortStats(cur.map(o=>o[k])); return st?`<tr><th>${lab}</th><td>${st.n}</td><td>${wonShort(st.mean)}</td><td>${wonShort(st.med)}</td><td>${wonShort(st.q3)}</td><td>${wonShort(st.top10)}</td><td>${wonShort(st.max)}</td></tr>`:""; }).join("");
+  const months=cohortMonths();
+  const cmpKeys=CO_KEYS.slice(0,4);
+  const cmpRows=months.map(m=>{ const V=valsOf(m); return `<tr class="${m===sub?"sel":""}"><th>${esc(monthLabel(m))}</th><td>${V.length}</td>${cmpKeys.map(([k])=>{ const st=cohortStats(V.map(o=>o[k])); return st?`<td>${wonShort(st.med)} <span class="q3">/ ${wonShort(st.q3)}</span> <span class="cn">(${st.n})</span></td>`:`<td class="na">–</td>`; }).join("")}</tr>`; }).join("");
+  el.innerHTML=`<div class="lab">${esc(monthLabel(sub))} 론칭 신작 ${cur.length}개 · 같은 시기 거래액</div>
+    <div class="cowrap"><table class="cotab"><thead><tr><th></th><th>작품 수</th><th>평균</th><th>중앙값</th><th>상위 25%</th><th>상위 10개 평균</th><th>최고</th></tr></thead><tbody>${statRows||`<tr><td colspan="7" class="na">아직 첫 주가 지난 작품이 없어요</td></tr>`}</tbody></table></div>
+    <div class="lab" style="margin-top:14px">월별 비교 · 중앙값 / 상위 25% 진입선 (작품 수)</div>
+    <div class="cowrap"><table class="cotab"><thead><tr><th>론칭 월</th><th>작품</th>${cmpKeys.map(([,lab])=>`<th>${lab}</th>`).join("")}</tr></thead><tbody>${cmpRows}</tbody></table></div>
+    <div class="nnote">거래액 = 론칭 후 그 기간 다운로드 증가 × 작품 단가 · 그 기간이 지난 작품만 셈 · 매일 자동 갱신, 주차 기록은 계속 보관 · 다운로드 기록이 2026-09-08부터라 그 전 론칭작은 없어요</div>`;
+}
+function cohortHtml(d){
+  const o=d._co||{}, k=sMode, lab=(CO_KEYS.find(x=>x[0]===k)||[])[1]||"";
+  if(o[k]==null) return `<div class="rev rev-none">${lab}<br>대기</div>`;
+  const others=CO_KEYS.filter(x=>x[0]!==k&&o[x[0]]!=null).slice(0,2).map(x=>x[1]+" "+wonShort(o[x[0]])).join(" · ");
+  return `<div class="rev" title="론칭 ${lab} 거래액"><span class="rev-full">${wonFmt(o[k])}</span><span class="rev-per">${others||lab}</span></div>`;
+}
+function ensureLW(){ if(LW) return Promise.resolve(); if(!lwLoading) lwLoading=fetchJSON("data/launch_weeks.json").then(d=>{LW=d;}).catch(()=>{LW={works:{}};}); return lwLoading; }
+const GROUPS=[["naver","네이버웹툰",["app","appgenre","weekday","genre","revenue","newworks","cohort","revchange","done"]],["series","시리즈",["series","promo"]]];
 let group="naver";
 const subLabel = s => (src==="app"||src==="appgenre") ? s : (SOURCES[src].subs().find(x=>x[0]===s)||[s,s])[1];
 const varLabel = () => { const vs=SOURCES[src].variants; return vs?(vs.find(x=>x[0]===variant)||["",""])[1]:""; };
@@ -431,7 +470,7 @@ function selectGroup(g){
   selectSrc(srcs[0]);
 }
 function selectSrc(k){
-  src=k; fMode="all"; sMode=((SOURCES[k].caps.revenue||SOURCES[k].caps.revchange)&&SOURCES[k].sorts[0]&&SOURCES[k].sorts[0][0])?SOURCES[k].sorts[0][0]:"rank"; query="";
+  src=k; fMode="all"; sMode=((SOURCES[k].caps.revenue||SOURCES[k].caps.revchange||SOURCES[k].caps.cohort)&&SOURCES[k].sorts[0]&&SOURCES[k].sorts[0][0])?SOURCES[k].sorts[0][0]:"rank"; query="";
   document.querySelectorAll("#srcnav .src").forEach(b=>b.setAttribute("aria-selected", b.dataset.src===k));
   document.getElementById("wsel").style.display=(k==="app"&&WEEKS.length>1)?"":"none";
   document.getElementById("gwsel").style.display=(k==="appgenre"&&AGEN_IDX&&AGEN_IDX.weeks.length>1)?"":"none";
@@ -449,6 +488,7 @@ function selectSrc(k){
   sn.onclick=e=>{ const b=e.target.closest("[data-sub]"); if(!b)return; sub=b.dataset.sub; renderSubnav(); renderView(); };
   document.getElementById("q").value="";
   if(k==="series" && !SERIES){ document.getElementById("board").innerHTML=`<li class="empty">시리즈 불러오는 중…</li>`; ensureSeries().then(()=>{ setupSeriesCtl(); renderView(); }); return; }
+  if(k==="cohort" && (!LW||!SERIESDET||!DETAILS)){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; Promise.all([ensureLW(), ensureSeriesDetails(), ensureDetails()]).then(()=>{ if(src!=="cohort") return; sub=SOURCES.cohort.subs()[0][0]; renderSubnav(); renderView(); }); return; }
   if(k==="weekday" && !APPWD){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureAppWd().then(()=>{ if(src==="weekday"){ renderSubnav(); renderView(); } }); return; }
   if(k==="appgenre" && !AGEN){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureAgen().then(()=>{ if(src!=="appgenre") return; document.getElementById("gwsel").style.display=(AGEN_IDX&&AGEN_IDX.weeks.length>1)?"":"none"; renderSubnav(); renderView(); }); return; }
   if(k==="promo" && !PROMO){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensurePromo().then(()=>renderView()); return; }
@@ -485,6 +525,7 @@ function renderView(){
   document.getElementById("tiles").hidden=!(caps.tiles||caps.newtiles);
   document.getElementById("panels").hidden=!caps.tiles;
   document.getElementById("ntop").hidden=!caps.newtiles;
+  document.getElementById("cohort").hidden=!caps.cohort; if(caps.cohort) renderCohort();
   document.getElementById("gapPanel").hidden=!caps.gap;
   if(caps.tiles) renderStats(); else if(caps.newtiles) renderNewTiles();
   if(caps.gap) renderGap();
@@ -635,7 +676,12 @@ function renderList(){
     if(fMode==="rest") return d.b.includes("휴재");
     return true;
   });
-  if(caps.revchange){
+  if(caps.cohort){   // 신작 월별: 고른 기간(첫 주·N주 누적) 거래액 큰 순, 그 기간이 안 지난 작품은 뒤로
+    rows.forEach(d=>{ const x=LW&&LW.works[d.id]; d._co=x?cohortVals(x):{}; });
+    const v=d=>d._co[sMode]!=null?d._co[sMode]:-1;
+    rows=[...rows].sort((a,b)=>v(b)-v(a)); let rk=0; rows.forEach(d=>{ d._rk = d._co[sMode]!=null ? ++rk : "–"; });
+  }
+  else if(caps.revchange){
     rows=rows.map(d=>{ d._wr=weeklyRevenue(d.name, dowOf(d), revWeek); d._pend=!d._wr && revWeekPending(d.name, dowOf(d), revWeek); return d; }).filter(d=>d._wr||d._pend);
     rows=[...rows].sort((a,b)=> (!a._wr||!b._wr) ? ((!a._wr)-(!b._wr)) : sMode==="loss" ? (a._wr.sortKey-b._wr.sortKey) : (b._wr.sortKey-a._wr.sortKey));   // 주간 대기는 맨 뒤
     let rk=0; rows.forEach(d=>{ d._rk = d._wr ? ++rk : "–"; });
@@ -674,12 +720,12 @@ function renderList(){
   if(!rows.length){ board.innerHTML=`<li class="empty">${caps.revchange?"아직 완전한 한 주가 안 끝났어요. 연재요일별로 순차 표시돼요(수 9/16, 목 9/17 …). 수집 다운수가 전날 누적이라 주 마감 다음날부터 잡힙니다.":"조건에 맞는 작품이 없어요."}</li>`; return; }
   const showRev = caps.revenue || sMode==="revenue";
   board.innerHTML=rows.map((d,i)=>{
-    const rk = (caps.revenue||caps.revchange) ? (d._rk||i+1) : d.r;
+    const rk = (caps.revenue||caps.revchange||caps.cohort) ? (d._rk||i+1) : d.r;
     const thumb=d.th?`<img class="thumb" loading="lazy" src="${esc(d.th)}" alt="">`:`<div class="thumb ph">🎬</div>`;
     return `<li class="rowli ${rk<=3?"top"+rk:""}" role="button" tabindex="0" data-i="${i}">
       <div class="rk tnum">${rk}</div>${thumb}
-      <div class="cell"><div class="ttl"><span class="name">${esc(d.name)}</span>${badgeHtml(d)}</div><div class="auth">${esc(d.a)}${caps.done&&DETAILS&&DETAILS[d.id]?` · <span style="color:var(--muted)">${esc(DETAILS[d.id].day||"")}${DETAILS[d.id].fav?" · 관심 "+DETAILS[d.id].fav.toLocaleString():""}</span>`:""}${caps.newworks&&DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch?` · <span style="color:var(--accent)">🆕 ${esc(DETAILS[d.id].launch)}</span>`:""}</div></div>
-      ${(caps.revchange || (caps.newworks && (sMode==="deal"||sMode==="dgain"))) ? revChangeHtml(d) : showRev ? revHtml(d) : (caps.move?moveHtml(d.m):"")}
+      <div class="cell"><div class="ttl"><span class="name">${esc(d.name)}</span>${badgeHtml(d)}</div><div class="auth">${esc(d.a)}${caps.done&&DETAILS&&DETAILS[d.id]?` · <span style="color:var(--muted)">${esc(DETAILS[d.id].day||"")}${DETAILS[d.id].fav?" · 관심 "+DETAILS[d.id].fav.toLocaleString():""}</span>`:""}${(caps.newworks||caps.cohort)&&DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch?` · <span style="color:var(--accent)">🆕 ${esc(DETAILS[d.id].launch)}</span>`:""}</div></div>
+      ${caps.cohort ? cohortHtml(d) : (caps.revchange || (caps.newworks && (sMode==="deal"||sMode==="dgain"))) ? revChangeHtml(d) : showRev ? revHtml(d) : (caps.move?moveHtml(d.m):"")}
     </li>`;
   }).join("");
 }

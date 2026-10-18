@@ -369,3 +369,14 @@ footer a:hover{text-decoration:underline}
 .ntop .nnote{font-size:11.5px; color:var(--faint); margin-bottom:4px}
 .ntop .nmore{display:block; margin:10px auto 0; border:1px solid var(--border); background:var(--surface); color:var(--muted); font:inherit; font-size:12.5px; font-weight:600; border-radius:9px; padding:6px 14px; cursor:pointer}
 .ntop .nmore:hover{color:var(--accent); border-color:var(--accent)}
+/* 신작 월별: 같은 시기 거래액 표 + 월별 비교 표 */
+.cohort{margin-bottom:16px}
+.cohort .cowrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
+.cotab{width:100%; border-collapse:collapse; font-size:12.5px; font-variant-numeric:tabular-nums; white-space:nowrap}
+.cotab th,.cotab td{padding:7px 8px; border-bottom:1px solid var(--border); text-align:right}
+.cotab thead th{font-size:11px; color:var(--faint); font-weight:600}
+.cotab tbody th{text-align:left; font-weight:700; color:var(--ink)}
+.cotab td{color:var(--ink)} .cotab td.na{color:var(--faint); text-align:center}
+.cotab .q3{color:var(--muted)} .cotab .cn{color:var(--faint); font-size:11px}
+.cotab tr.sel th,.cotab tr.sel td{background:var(--accent-soft, rgba(0,0,0,.04))}
+.cohort .nnote{font-size:11.5px; color:var(--faint); margin-top:10px; line-height:1.5}
