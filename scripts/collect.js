@@ -666,6 +666,8 @@ if (require.main === module) (async ()=>{
   fs.writeFileSync(path.join(OUT,"genre.json"), JSON.stringify({ updated, date, web:web_gn, app:app_gn }));
   fs.writeFileSync(path.join(OUT,"series.json"), JSON.stringify({ updated, date, comic:s_comic, novel:s_novel }));
   try { const promo = await collectPromo(); fs.writeFileSync(path.join(OUT,"promo.json"), JSON.stringify({ updated, date, comic:promo.comic, novel:promo.novel })); } catch(e){ console.error("promo failed:", e.message); }
+  // 앱 장르 주간랭킹 1~45위(검색 위젯) — 같은 주에 폰 수집(100위+순위변동)이 있으면 그걸 유지. scripts/lib/app_genre.cjs
+  try { console.log("app genre (widget):", JSON.stringify(await require("./lib/app_genre.cjs").collectWidgetAll(OUT, date))); } catch(e){ console.error("app genre failed:", e.message); }
   // 검색연동(신작 등 미연동 웹툰을 시리즈에 연결) → collectSeriesDetails가 이어서 다운수 갱신. PC 없이 클라우드에서 매일.
   try {
     let sd={}; try{ sd=JSON.parse(fs.readFileSync(path.join(OUT,"series_details.json"),"utf8")); }catch(e){}
