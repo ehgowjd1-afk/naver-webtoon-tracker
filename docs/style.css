@@ -348,3 +348,24 @@ footer a:hover{text-decoration:underline}
 .cpt.p-id{border-left-color:var(--gold); background:var(--surface-2)}
 .cpt.p-id .cdeep summary{color:var(--gold)}
 .cidl{font-size:13px; line-height:1.6; color:var(--ink); margin-top:5px}
+/* 신작 탭 주간 거래액 TOP 10 (요약 칸 아래) — 넓은 화면은 1~5 / 6~10 두 줄 */
+.ntop{margin-bottom:16px}
+.ntop .nlist{display:grid; grid-template-rows:repeat(var(--nrows,5),auto); grid-auto-flow:column; gap:0 24px}
+@media(max-width:680px){.ntop .nlist{grid-template-rows:none; grid-auto-flow:row}}
+.ntop .nrow{display:flex; align-items:center; gap:8px; width:100%; padding:7px 2px; border:0; border-bottom:1px solid var(--border); background:none; color:inherit; font:inherit; font-size:13px; text-align:left; cursor:pointer}
+.ntop .nrow:hover .nt{color:var(--accent)}
+.ntop .nr{width:20px; flex:none; font-weight:700; font-variant-numeric:tabular-nums; color:var(--muted)}
+.ntop .nrow.top .nr{color:var(--accent)}
+.ntop .nt{flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:600}
+.ntop .nd{font-variant-numeric:tabular-nums; font-weight:700; white-space:nowrap}
+.ntop .nc{min-width:76px; text-align:right; font-size:11.5px; font-variant-numeric:tabular-nums; white-space:nowrap}
+.ntop .nc.up{color:var(--up)} .ntop .nc.down{color:var(--down)} .ntop .nc.same{color:var(--faint)}
+.ntop .nl{min-width:56px; text-align:right; font-size:11px; color:var(--faint); white-space:nowrap}
+@media(max-width:420px){.ntop .nl{display:none}}
+.ntop .nempty{font-size:13px; color:var(--muted); padding:4px 0}
+.ntop .nbasis{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:-2px 0 6px}
+.ntop .nbasis .chip{height:28px; font-size:12px; padding:0 10px}
+.ntop .nsep{width:1px; height:18px; background:var(--border); margin:0 4px}
+.ntop .nnote{font-size:11.5px; color:var(--faint); margin-bottom:4px}
+.ntop .nmore{display:block; margin:10px auto 0; border:1px solid var(--border); background:var(--surface); color:var(--muted); font:inherit; font-size:12.5px; font-weight:600; border-radius:9px; padding:6px 14px; cursor:pointer}
+.ntop .nmore:hover{color:var(--accent); border-color:var(--accent)}

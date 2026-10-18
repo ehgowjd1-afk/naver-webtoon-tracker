@@ -10,7 +10,8 @@ const SERIES_PLATS = [["web","웹"],["mobile","모바일"]];
 let APP=null, WEEKDAY=null, GENRE=null, SERIES=null, PROMO=null, LOOKUP={id:{},name:{}}, WEEKS=[];
 let AGEN=null, AGEN_IDX=null, agenLoading=null;   // 앱 장르 주간랭킹(data/app_genre/) — 탭 열 때 불러옴
 const AGEN_GENRES=["판타지·무협","액션","드라마","로맨스","스릴러","일상·개그"];
-let APPWD=null, APPWDH=null, appwdLoading=null;   // 앱 요일별 인기순(폰 화면, data/app_weekday*.json) — 요일별 › 앱
+let APPWD=null, APPWDH=null, appwdLoading=null;
+let NTOP=[];   // 신작 탭 주간 거래액 TOP 10(요약 칸 아래)   // 앱 요일별 인기순(폰 화면, data/app_weekday*.json) — 요일별 › 앱
 const APPWD_SUBS=[["all","전체"], ["new","신작"], ...WEEKDAYS];
 let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="", revWeek="";
 let rowsCache=[];
@@ -483,6 +484,7 @@ function renderView(){
   document.getElementById("meta").innerHTML=`${esc(S.note(variant))} · <b>${esc(subLabel(sub))}</b>`;
   document.getElementById("tiles").hidden=!(caps.tiles||caps.newtiles);
   document.getElementById("panels").hidden=!caps.tiles;
+  document.getElementById("ntop").hidden=!caps.newtiles;
   document.getElementById("gapPanel").hidden=!caps.gap;
   if(caps.tiles) renderStats(); else if(caps.newtiles) renderNewTiles();
   if(caps.gap) renderGap();
@@ -538,6 +540,55 @@ function renderNewTiles(){
     {lab:"📈 상승률 1위",cls:"up",big:nm(rt),sub:rt?`+${Math.round(rate(rt)*100)}% · 이번주 ${wonFmt(rt.wr.deal)}${dd(rt)}`:"전주 100만 원 이상 중 상승 없음"}
   ];
   document.getElementById("tiles").innerHTML=tiles.map(t=>`<div class="tile"><div class="lab">${t.lab}</div><div class="big ${t.cls}">${t.big}</div><div class="sub2">${esc(t.sub)}</div></div>`).join("");
+  renderNtop();
+}
+/* 신작 거래액 TOP 10 판(요약 칸 아래). 기준: 이번 주(작품별 연재요일 주) 또는 론칭일에 맞춘 N주차(그 주만 / N주 누적).
+   론칭 N주차 = 론칭일 L부터 7일씩. 수집일 X의 다운수 = X-1까지 누적이라 N주차 다운 = D(L+7N) − D(L+7(N-1)).
+   신작 시리즈는 론칭 1~3일 뒤에 처음 잡히고 그 전엔 상품이 없으므로 론칭일 누적=0으로 봄(첫 기록이 론칭 뒤 7일 안일 때만). 누르면 작품 상세, '전체 보기'로 펼침 */
+let NTOP_BASIS="now", NTOP_MODE="week", NTOP_ALL=false;
+const launchIso = d => { const m=String(DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch||"").match(/(\d{2})\.(\d{2})\.(\d{2})/); return m?`20${m[1]}-${m[2]}-${m[3]}`:null; };
+function launchWeekDeals(d){
+  const rv=revenueFor(d.name); if(!rv||!REVHIST||!REVHIST.works) return [];
+  const w=REVHIST.works[rv.pn], L=launchIso(d); if(!w||!L) return [];
+  const dates=REVHIST.dates||[], idx={}; dates.forEach((x,i)=>idx[x]=i);
+  const fi=w.dl.findIndex(v=>v!=null); if(fi<0) return [];
+  const lag=dayNum(dates[fi])-dayNum(L), fresh=lag>0&&lag<=7;   // 론칭 뒤 7일 안에 처음 잡힌 새 상품
+  const at=dt=>{ if(dt===L && fresh) return {v:0,est:false}; const i=idx[dt]; if(i==null||i<fi) return null; return dlAt(w,i,dates); };
+  const out=[];
+  for(let k=1;k<=6;k++){ const a=at(addDays(L,7*(k-1))), b=at(addDays(L,7*k)); if(!a||!b) break; const dDl=b.v-a.v; out.push({k, dDl, deal:dDl*rv.up, est:a.est||b.est}); }
+  return out;
+}
+function renderNtop(){
+  const el=document.getElementById("ntop"); if(!el) return;
+  const day=d=>{ const lt=parseLaunch(DETAILS&&DETAILS[d.id]&&DETAILS[d.id].launch); return lt?Math.floor((Date.now()-lt)/86400000)+1:null; };
+  const N=NTOP_BASIS==="now"?0:+NTOP_BASIS;
+  let items;
+  if(!N){
+    items=viewRows().map(d=>{ const wr=weeklyRevenue(d.name, dowOf(d), ""); return wr&&wr.deal>0?{d, v:wr.deal, est:wr.est, ch:wr.dealDelta, chLab:"전주", tip:`${mdShort(wr.ws)}~${mdShort(wr.we)} 주`}:null; }).filter(Boolean);
+  } else {
+    items=viewRows().map(d=>{ const W=launchWeekDeals(d); if(W.length<N) return null; const cur=W[N-1], prev=W[N-2];
+      const v=NTOP_MODE==="cum"?W.slice(0,N).reduce((s,x)=>s+x.deal,0):cur.deal;
+      const L=launchIso(d);
+      return {d, v, est:W.slice(0,N).some(x=>x.est), ch:NTOP_MODE==="cum"?null:(prev?cur.deal-prev.deal:null), chLab:`${N-1}주차`, tip:NTOP_MODE==="cum"?`론칭 ${mdShort(L)} · 1~${N}주 ${mdShort(L)}~${mdShort(addDays(L,7*N-1))}`:`론칭 ${mdShort(L)} · ${N}주차 ${mdShort(addDays(L,7*(N-1)))}~${mdShort(addDays(L,7*N-1))}`}; }).filter(x=>x&&x.v>0);
+  }
+  items.sort((a,b)=>b.v-a.v);
+  NTOP=NTOP_ALL?items:items.slice(0,10);
+  const title=!N?"주간 거래액":NTOP_MODE==="cum"?`론칭 ${N}주 누적 거래액`:`론칭 ${N}주차 거래액`;
+  const rowHtml=(x,i)=>{ const c=x.ch==null?"same":x.ch>0?"up":x.ch<0?"down":"same";
+    const ct=NTOP_MODE==="cum"&&N?"":x.ch==null?(N===1?"첫 주":`${x.chLab} 없음`):(x.ch>0?"▲":x.ch<0?"▼":"±")+wonFmt(Math.abs(x.ch));
+    return `<button class="nrow ${i<3?"top":""}" data-k="${i}" title="${esc(x.d.name)} · ${esc(x.tip)}${x.ch!=null?" · "+x.chLab+" 대비":""}"><span class="nr">${i+1}</span><span class="nt">${esc(x.d.name)}</span><span class="nd">${x.est?"≈":""}${wonFmt(x.v)}</span><span class="nc ${c}">${ct}</span><span class="nl">${day(x.d)?day(x.d)+"일차":""}</span></button>`; };
+  const chips=[["now","이번 주"],...[1,2,3,4,5,6].map(k=>[String(k),k+"주차"])].map(([k,l])=>`<button class="chip" data-nb="${k}" aria-pressed="${k===NTOP_BASIS}">${l}</button>`).join("");
+  const modes=N?`<span class="nsep"></span><button class="chip" data-nm="week" aria-pressed="${NTOP_MODE==="week"}">그 주만</button><button class="chip" data-nm="cum" aria-pressed="${NTOP_MODE==="cum"}">${N}주 누적</button>`:"";
+  const note=!N?"작품마다 자기 연재요일 기준 최근 한 주 · 전주 대비":`론칭일에 맞춘 비교 · 론칭 ${N*7}일 넘은 신작 ${items.length}개${NTOP_MODE==="cum"?` · 론칭 후 ${N}주 합계`:N===1?" · 론칭 첫 7일":` · ${N-1}주차 대비`}`;
+  el.innerHTML=`<div class="lab">${title} ${NTOP_ALL?"전체":"TOP 10"} · 런칭 ${sub}일 이내 신작</div><div class="nbasis">${chips}${modes}</div><div class="nnote">${esc(note)}</div>`
+    +(NTOP.length?`<div class="nlist" style="--nrows:${Math.max(1,Math.ceil(NTOP.length/2))}">${NTOP.map(rowHtml).join("")}</div>`:`<div class="nempty">${N?`론칭 ${N*7}일이 지난 신작이 아직 없어요.`:"아직 한 주가 쌓인 신작이 없어요."}</div>`)
+    +(items.length>10?`<button class="nmore" data-nall="1">${NTOP_ALL?"접기 ▴":`전체 보기 (${items.length}개) ▾`}</button>`:"");
+  el.onclick=e=>{
+    const nb=e.target.closest("[data-nb]"); if(nb){ NTOP_BASIS=nb.dataset.nb; renderNtop(); return; }
+    const nm=e.target.closest("[data-nm]"); if(nm){ NTOP_MODE=nm.dataset.nm; renderNtop(); return; }
+    if(e.target.closest("[data-nall]")){ NTOP_ALL=!NTOP_ALL; renderNtop(); return; }
+    const b=e.target.closest("[data-k]"); if(b&&NTOP[+b.dataset.k]) openModal({...NTOP[+b.dataset.k].d, _rk:+b.dataset.k+1});
+  };
 }
 function renderGap(){
   if(!APP) return;
@@ -725,7 +776,7 @@ function openModal(d){
   document.querySelector(".modal-card").classList.remove("wide");   // 댓글 분석 있는 작품만 넓게(cmt.js가 다시 켬)
   const url=urlFor(d), caps=SOURCES[src].caps;
   const badges=badgeHtml(d)+(caps.move?`<span class="badge ${d.m>0?"b-new":d.m<0?"b-rest":"b-fin"}">${d.m>0?"▲"+d.m:d.m<0?"▼"+Math.abs(d.m):"변동없음"}</span>`:"");
-  const ctx=`${esc(SOURCES[src].label)}${variant?" · "+esc(varLabel()):""} · ${esc(subLabel(sub))} · <b>${d.r}위</b>`;
+  const ctx=`${esc(SOURCES[src].label)}${variant?" · "+esc(varLabel()):""} · ${esc(subLabel(sub))}${(typeof d._rk==="number"?d._rk:d.r)?` · <b>${typeof d._rk==="number"?d._rk:d.r}위</b>`:""}`;   // 매출·신작 목록은 정렬 순서(_rk), 랭킹은 원래 순위
   const webtoon = !caps.series && d.id!=null;
   const isSeries = caps.series && d.id!=null;
   document.getElementById("modalBody").innerHTML=`
