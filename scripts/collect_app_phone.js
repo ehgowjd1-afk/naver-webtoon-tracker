@@ -17,9 +17,12 @@ const PUSH = args.includes("--push"), DRY = args.includes("--dry");
 const ONLY = ((args.find((a) => a.startsWith("--genre=")) || "").slice(8)).split(",").filter(Boolean);
 const TODAY = G.kstToday();
 
-// 작품 화면 열고 그 장르 랭킹 태그 누르기 → 랭킹 화면이면 true
+// 작품 화면 열고 랭킹 태그 누르기 → 랭킹 화면이면 true. key = 정규화한 태그 글자(예 "판타지무협랭킹", "주간랭킹"), headOk = 열린 화면 제목 확인
 function openGenreRanking(label, ids) {
   const key = G.norm(label) + "랭킹";
+  return openRankingByTag(key, (t) => /주간랭킹/.test(t) && G.norm(t).includes(G.norm(label)), ids, `${label}랭킹`);
+}
+function openRankingByTag(key, headOk, ids, what) {
   const findTag = (nodes) => nodes.find((n) => /^#/.test(n.d) && G.norm(n.d).includes(key) && n.b.length);
   for (const id of ids) {
     adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'webtoonkr://contentList?version=2&league=WEBTOON&titleId=${id}'`, PKG);
@@ -35,13 +38,13 @@ function openGenreRanking(label, ids) {
       const syn = title && nodes.find((n) => n.cls === "Button" && n.b.length && n.b[2] - n.b[0] > 800 && n.b[1] >= title.b[3] + 40 && (!tabs || n.b[3] <= tabs.b[1]));
       if (syn) { tap(syn.b); wait(1500); nodes = dump(); tag = findTag(nodes); }
     }
-    if (!tag) { log(`  #${id} 에 '${label}랭킹' 태그 없음`); back(); wait(1000); continue; }
+    if (!tag) { log(`  #${id} 에 '${what}' 태그 없음`); back(); wait(1000); continue; }
     tap(tag.b);
     if (!waitFocus(/CurationActivity/)) { log(`  #${id} 태그 눌렀는데 랭킹 화면이 안 열림`); back(); wait(1000); continue; }
     wait(2500);
-    const head = dump().find((n) => /주간랭킹/.test(n.t));
-    if (head && G.norm(head.t).includes(G.norm(label))) return true;
-    log(`  #${id} 열린 화면 제목이 다름: ${head ? head.t : "?"}`); back(); wait(1000); back(); wait(1000);
+    const head = dump().find((n) => n.t && headOk(n.t));
+    if (head) return true;
+    log(`  #${id} 열린 화면이 '${what}' 화면이 아님`); back(); wait(1000); back(); wait(1000);
   }
   return false;
 }
@@ -90,7 +93,8 @@ function scrapeRanking() {
   return [...got.values()].sort((a, b) => a.r - b.r);
 }
 
-(async () => {
+module.exports = { openRankingByTag, parseBoxes, scrapeRanking };
+if (require.main === module) (async () => {
   const t0 = Date.now();
   log(`앱 장르 주간랭킹(폰) 수집 시작 ${TODAY}${DRY ? " [dry]" : ""}`);
   // 순위는 월요일에 한 번 바뀜 → 이번 주(가장 최근 월요일) 파일에 6개 장르가 모두 폰 결과로 있으면 그 주는 끝(--force로 강제)

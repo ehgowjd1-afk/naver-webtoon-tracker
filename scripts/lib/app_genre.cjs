@@ -18,12 +18,14 @@ const dec = (s) => String(s || "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 검색 위젯(key=webtoonGenre) → [{r,t,a,id}] 최대 45개
-async function fetchWidgetGenre(code) {
+async function fetchWidgetGenre(code) { return fetchWidgetList("webtoonGenre", code); }
+// 같은 위젯의 다른 목록(key=webtoonWeek, u1=TOTAL|FEMALE|MALE = 앱 이번 주 웹툰 랭킹 1~45위)
+async function fetchWidgetList(key, u1) {
   const out = [];
   for (const start of [0, 15, 30]) {
-    const url = `https://ts-proxy.naver.com/content/nqapirender.nhn?key=webtoonGenre&where=nexearch&pkid=47&display=15&start=${start}&u1=${code}`;
+    const url = `https://ts-proxy.naver.com/content/nqapirender.nhn?key=${key}&where=nexearch&pkid=47&display=15&start=${start}&u1=${u1}`;
     const r = await fetch(url, { headers: { "User-Agent": UA, Referer: "https://search.naver.com/" } });
-    if (!r.ok) throw new Error(`widget ${code} ${r.status}`);
+    if (!r.ok) throw new Error(`widget ${key} ${u1} ${r.status}`);
     const j = await r.json();
     const lis = String(j.html || "").split("<li>").slice(1);
     if (!lis.length) break;
@@ -93,4 +95,4 @@ async function collectWidgetAll(dataDir, today) {
   return res;
 }
 
-module.exports = { GENRES, norm, fetchWidgetGenre, kstToday, lastMonday, sameRanking, pickWeek, saveGenre, collectWidgetAll };
+module.exports = { GENRES, norm, fetchWidgetGenre, fetchWidgetList, kstToday, lastMonday, sameRanking, pickWeek, saveGenre, collectWidgetAll };

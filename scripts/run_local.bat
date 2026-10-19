@@ -5,9 +5,11 @@ cd /d "%~dp0.."
 set NODE_EXE=C:\Program Files\nodejs\node.exe
 if not exist "%NODE_EXE%" set NODE_EXE=node
 "%NODE_EXE%" scripts\collect_local.js --push >> scripts\local_last_run.log 2>&1
+REM 앱 「이번 주 웹툰 랭킹」 전체/여성/남성 100위(폰). 새 주 순위가 나왔고 그 주 파일이 없을 때만 저장(손으로 넣은 파일은 안 덮음).
+"%NODE_EXE%" scripts\collect_app_weekly.js --push >> scripts\local_last_run.log 2>&1
 REM 앱 장르 주간랭킹 100위(USB 연결한 안드로이드 폰 화면 읽기). 폰 없거나 잠겨 있으면 자동 스킵, 이번 주 다 받았으면 스킵.
 "%NODE_EXE%" scripts\collect_app_phone.js --push >> scripts\local_last_run.log 2>&1
-REM 앱 요일별 인기순(전체·매일+·월~일, 폰 화면) — 사이트 '요일별 > 앱'. 오늘 이미 받았으면 스킵.
+REM 앱 요일별 인기순(전체[인기·여성·남성]·신작·매일+·월~일, 폰 화면) — 사이트 '요일별 > 앱'. 오늘 이미 받았으면 스킵.
 "%NODE_EXE%" scripts\collect_app_weekday.js --push >> scripts\local_last_run.log 2>&1
 REM 성인 다운수는 별도 작업('웹툰 성인수집 재시도')이 하루 여러번 시도(연령확인되면 그때 수집·이미했으면 스킵).
 REM 노션에 매출순 상위 300개 그날 데이터 추가(누적). 노션 설정(.notion.json) 없으면 자동 스킵.

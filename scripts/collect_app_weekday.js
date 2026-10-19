@@ -3,7 +3,7 @@
  * 웹툰 탭 → 정렬을 '인기순'으로(끝나면 사용자가 쓰던 정렬로 되돌림) → 탭마다 끝까지 스크롤하며 3열 목록 글자를 읽음.
  * 목록은 '따끈따끈! 업데이트 매일+' 같은 구역 제목이 나오는 곳에서 끝남(그 아래 칸은 다른 구역).
  * m.comic(모바일 웹) 인기순과 실제 앱 순서는 다름(2026-10-18 목요일 같은 자리 8/110) → 사이트 '요일별 › 앱'은 이 데이터.
- * 저장: docs/data/app_weekday.json = {date, updated, tabDates:{탭:날짜}, tabs:{all|new|dailyPlus|mon..sun:[{r,t,a,id,th?,b[]}]}}
+ * 저장: docs/data/app_weekday.json = {date, updated, tabDates:{탭:날짜}, tabs:{all|all_f|all_m(전체 탭 여성·남성 인기순)|new|dailyPlus|mon..sun:[{r,t,a,id,th?,b[]}]}}
  *       docs/data/app_weekday_history.json = {dates:[], series:{탭:{titleId:[순위…]}}} (최근 60일)
  *   node scripts/collect_app_weekday.js [--push] [--tabs=all,mon] [--dry] [--force]
  */
@@ -19,6 +19,10 @@ const PUSH = args.includes("--push"), DRY = args.includes("--dry"), FORCE = args
 const ONLY = ((args.find((a) => a.startsWith("--tabs=")) || "").slice(7)).split(",").filter(Boolean);
 const TODAY = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 const ALL_MAX = 500;   // 전체 탭은 2천 개가 넘어(28분) 상위 500위까지만
+// 탭마다 인기순·여성 인기순·남성 인기순 셋 다(키: all · all_f · all_m, mon · mon_f · mon_m …). --gender-only = 여성·남성만(인기순은 이미 받은 날)
+const SORT_KEYS = { "인기순": "", "여성 인기순": "_f", "남성 인기순": "_m" };
+const ALL3 = ["인기순", "여성 인기순", "남성 인기순"];
+const SORTS = args.includes("--gender-only") ? ["여성 인기순", "남성 인기순"] : ALL3;
 const TABS = [["all", "전체"], ["new", "신작"], ["dailyPlus", "매일+"], ["mon", "월요 연재"], ["tue", "화요 연재"], ["wed", "수요 연재"], ["thu", "목요 연재"], ["fri", "금요 연재"], ["sat", "토요 연재"], ["sun", "일요 연재"]];
 const TABNAMES = new Set(["전체", "신작", "매일+", "월요 연재", "화요 연재", "수요 연재", "목요 연재", "금요 연재", "토요 연재", "일요 연재", "완결"]);
 // 탭 줄 위치는 '신작'을 빼고 잡음 — 썸네일 위 '신작' 표시도 같은 이름이라서
@@ -107,7 +111,8 @@ function updateHistory(tabs) {
   const t0 = Date.now();
   log(`앱 요일별 인기순(폰) 수집 시작 ${TODAY}${DRY ? " [dry]" : ""}`);
   const prev = readJSON(path.join(OUT, "app_weekday.json"), { tabs: {}, tabDates: {} });
-  if (!FORCE && !ONLY.length && TABS.every(([k]) => (prev.tabDates || {})[k] === TODAY)) { log("오늘 다 받음 — 건너뜀"); return; }
+  const KEYS = TABS.flatMap(([k]) => ALL3.map((x) => k + SORT_KEYS[x]));
+  if (!FORCE && !ONLY.length && KEYS.every((k) => (prev.tabDates || {})[k] === TODAY)) { log("오늘 다 받음 — 건너뜀"); return; }
   try { P.ensureReady(); } catch (e) { log("건너뜀:", e.message); return; }
   // 정렬은 탭마다 따로 기억됨(전체 탭만 '알아서 딱!'인 식) → 탭마다 인기순으로 바꿔 읽고, 바꾼 탭은 끝나고 원래 정렬로 되돌림
   const tabs = {}, changed = [];
@@ -119,10 +124,14 @@ function updateHistory(tabs) {
         toTop();
         if (!selectTab(label)) { log(`  [${label}] 탭을 못 찾음`); continue; }
         const orig = sortLabel(dump());
-        if (orig !== "인기순") { if (!setSort("인기순")) { log(`  [${label}] 정렬을 인기순으로 못 바꿈(지금: ${orig || "?"})`); continue; } changed.push([label, orig]); toTop(); }
-        const list = scrapeTab(key === "all" ? ALL_MAX : Infinity);
-        log(`  [${label}] ${list.length}개 · 1~3위 ${list.slice(0, 3).map((x) => x.t).join(", ")}${orig !== "인기순" ? ` (정렬 ${orig}→인기순)` : ""}`);
-        if (list.length >= 10) tabs[key] = list;
+        for (const so of SORTS) {
+          const k = key + SORT_KEYS[so];
+          if (sortLabel(dump()) !== so) { if (!setSort(so)) { log(`  [${label}] 정렬을 ${so}으로 못 바꿈(지금: ${sortLabel(dump()) || "?"})`); continue; } toTop(); }
+          const list = scrapeTab(key === "all" ? ALL_MAX : Infinity);
+          log(`  [${label} · ${so}] ${list.length}개 · 1~3위 ${list.slice(0, 3).map((x) => x.t).join(", ")}`);
+          if (list.length >= 10) tabs[k] = list;
+        }
+        if (orig && orig !== sortLabel(dump())) changed.push([label, orig]);   // 끝나고 원래 정렬로
       } catch (e) { log(`  [${label}] 실패: ${e.message}`); }
     }
   } catch (e) { log("실패:", e.message); }

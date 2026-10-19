@@ -16,6 +16,8 @@ let LW=null, lwLoading=null;   // 신작 월별: data/launch_weeks.json(론칭 �
 const CO_KEYS=[["w1","첫 주",1,false],["c2","2주 누적",2,true],["c4","4주 누적",4,true],["c8","8주 누적",8,true],["c12","12주 누적",12,true]];   // 앱 요일별 인기순(폰 화면, data/app_weekday*.json) — 요일별 › 앱
 const CO_SORTS=[["c2","2주 누적 거래액"],["w1","첫 주 거래액"],["c4","4주 누적 거래액"],["last","최근 주 거래액"],["keep","유지율"],["dl2","2주 다운로드"],["fav","관심 수"],["cmt","회차 댓글"],["app","앱 주간 순위"]];
 const APPWD_SUBS=[["all","전체"], ["new","신작"], ...WEEKDAYS];
+const GSORTS=[["pop","인기순"],["f","여성 인기순"],["m","남성 인기순"]];   // 요일별 › 앱 정렬 칩 → 데이터 키 접미사(mon · mon_f · mon_m)
+const gsuf = () => sMode==="f"?"_f":sMode==="m"?"_m":"";
 let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="", revWeek="";
 let rowsCache=[];
 let DETAILS=null, detailsLoading=null, HISTORY=null, historyLoading=null, KWINDEX=null, seriesLoading=null, promoLoading=null;
@@ -64,7 +66,7 @@ const SOURCES = {
   app:     { label:"앱 주간", variants:null, subs:()=>["전체","여성","남성"].map(k=>[k,String((APP&&APP.charts&&APP.charts[k]||[]).length)]), data:(v,s)=>APP&&APP.charts[s], caps:{move:1,streak:1,badge:1,tiles:1,gap:1}, filters:F_APP, sorts:S_APP, note:()=>`${weekLabel(APP.date)} · 앱 「이번 주 웹툰 랭킹」` },
   appgenre:{ label:"앱 장르 주간", variants:null, subs:()=>((AGEN_IDX&&AGEN_IDX.genres)||AGEN_GENRES).map(k=>[k,String((AGEN&&AGEN.charts&&AGEN.charts[k]||[]).length)]), data:(v,s)=>AGEN&&AGEN.charts&&AGEN.charts[s], caps:{move:1,streak:1,badge:1}, filters:F_APP, sorts:S_APP.filter(x=>x[0]!=="revenue"), note:()=>AGEN&&AGEN.date?`${weekLabel(AGEN.date)} · 앱 「${sub} 웹툰 주간랭킹」 · ${AGEN.src&&AGEN.src[sub]==="phone"?"앱 화면 100위(폰)":"검색 위젯 45위 · 순위변동은 폰 수집 때만"}`:"앱 장르 주간랭킹 · 아직 데이터 없음" },
   // 앱 = 폰으로 읽은 실제 앱 인기순(예전 '모바일'은 m.comic 모바일 웹이라 앱과 순서가 달라서 뺌)
-  weekday: { label:"요일별", variants:[["app","앱"],["web","웹"]], subs:()=>variant==="app"?APPWD_SUBS:WEEKDAYS, data:(v,s)=>v==="app"?(APPWD&&APPWD.tabs&&APPWD.tabs[s]):(WEEKDAY&&WEEKDAY.web&&WEEKDAY.web[s]), caps:{badge:1}, filters:F_MIN, sorts:[], note:v=>v==="app"?(APPWD&&APPWD.date?`${dot((APPWD.tabDates&&APPWD.tabDates[sub])||APPWD.date)} · 앱 인기순(폰 화면) · 매일`:"앱 인기순 · 아직 데이터 없음"):`${dot(WEEKDAY.date)} · 요일별 인기순 · 웹(PC) · 자동` },
+  weekday: { label:"요일별", variants:[["app","앱"],["web","웹"]], subs:()=>variant==="app"?APPWD_SUBS:WEEKDAYS, data:(v,s)=>v==="app"?(APPWD&&APPWD.tabs&&APPWD.tabs[s+gsuf()]):(WEEKDAY&&WEEKDAY.web&&WEEKDAY.web[s]), caps:{badge:1,gsort:1}, filters:F_MIN, get sorts(){ return variant==="app"?GSORTS:[]; }, note:v=>v==="app"?(APPWD&&APPWD.date?`${dot((APPWD.tabDates&&APPWD.tabDates[sub+gsuf()])||APPWD.date)} · 앱 ${(GSORTS.find(x=>x[0]===sMode)||GSORTS[0])[1]}(폰 화면) · 매일`:"앱 인기순 · 아직 데이터 없음"):`${dot(WEEKDAY.date)} · 요일별 인기순 · 웹(PC) · 자동` },
   // 웹(PC)만 — m.comic 모바일 장르는 2026-10-18부터 안 받음(앱 장르 순위는 '앱 장르 주간' 탭)
   genre:   { label:"장르", variants:null, subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE.web&&notDone(GENRE.web[s]), caps:{badge:1}, filters:F_MIN, sorts:[], note:()=>`${dot(GENRE.date)} · 장르별 인기순 · 웹(PC) · 자동 · 완결작은 완결 탭으로 옮김(순위 번호는 네이버 원래 순위)` },
   done:    { label:"완결", variants:null, subs:()=>doneSubs(), data:(v,s)=>doneWorkSet(s), caps:{revenue:1,badge:1,done:1}, filters:F_MIN, sorts:[["fav","관심수순"],["total","총거래액순"],["per","회차당순"]], note:()=>`완결된 웹툰 · 장르·신작·성인 목록에서 옮겨 왔어요` },
@@ -590,6 +592,7 @@ function selectSrc(k){
   document.getElementById("wsel").style.display=(k==="app"&&WEEKS.length>1)?"":"none";
   document.getElementById("gwsel").style.display=(k==="appgenre"&&AGEN_IDX&&AGEN_IDX.weeks.length>1)?"":"none";
   const vs=SOURCES[k].variants; variant = vs?vs[0][0]:null;
+  if(SOURCES[k].caps.gsort) sMode="pop";   // 요일별 › 앱: 인기순부터
   const vn=document.getElementById("varnav");
   if(vs){ vn.hidden=false; vn.innerHTML=vs.map(([code,lab],i)=>`<button class="var" role="tab" data-var="${code}" aria-selected="${i===0}">${lab}</button>`).join("");
     vn.onclick=e=>{ const b=e.target.closest("[data-var]"); if(!b)return; variant=b.dataset.var; [...vn.children].forEach(c=>c.setAttribute("aria-selected",c===b)); if(k==="series") setupSeriesCtl();
@@ -653,6 +656,7 @@ function renderControls(){
   sEl.innerHTML=SOURCES[src].sorts.map(([k,l])=>`<button class="chip" data-s="${k}" aria-pressed="${k===sMode}">${l}</button>`).join("");
   fEl.onclick=e=>{ const b=e.target.closest("[data-f]"); if(!b)return; fMode=b.dataset.f; [...fEl.children].forEach(c=>c.setAttribute("aria-pressed",c===b)); renderList(); };
   sEl.onclick=e=>{ const b=e.target.closest("[data-s]"); if(!b)return; sMode=b.dataset.s; [...sEl.children].forEach(c=>c.setAttribute("aria-pressed",c===b));
+    if(SOURCES[src].caps.gsort){ renderView(); return; }   // 요일별 › 앱 정렬은 데이터 자체가 바뀜 → 설명 줄까지 다시
     if(sMode==="revenue" && (!SERIES||!SERIESDET||!DETAILS)){ document.getElementById("board").innerHTML=`<li class="empty">시리즈 매출 데이터 불러오는 중…</li>`; Promise.all([ensureSeries(),ensureSeriesDetails(),ensureDetails()]).then(()=>{ SNAMEIDX=null; renderList(); }); return; }
     renderList(); };
 }
@@ -833,7 +837,7 @@ function renderList(){
     ? `<b>주단위 거래액</b> ${esc(revWeekLabel())} · 이번주−지난주 누적 거래액 · 전주 대비(<span style="color:var(--up)">▲</span>/<span style="color:var(--down)">▼</span>)은 완전한 2주부터`
     : `단가=(대여×0.9+소장×0.1)×100 · 총거래액=다운수×단가 · 회차당=총거래액×0.9×0.6÷시리즈 회차수 · 주단위거래액=이번주−지난주 누적`;
   countEl.innerHTML=`${rows.length}개 작품`+(fMode!=="all"||query?` (${subLabel(sub)} ${total}개 중)`:"")+((sMode==="revenue"||caps.revenue||caps.revchange)?` · <span style="color:var(--faint)">${revNote}</span>`:"");
-  if(!rows.length){ board.innerHTML=`<li class="empty">${caps.revchange?"아직 완전한 한 주가 안 끝났어요. 연재요일별로 순차 표시돼요(수 9/16, 목 9/17 …). 수집 다운수가 전날 누적이라 주 마감 다음날부터 잡힙니다.":"조건에 맞는 작품이 없어요."}</li>`; return; }
+  if(!rows.length){ board.innerHTML=`<li class="empty">${(caps.gsort&&variant==="app"&&!(SOURCES[src].data(variant,sub)||[]).length)?"이 정렬은 아직 수집 전이에요 — 매일 아침 폰 수집 때 함께 쌓여요.":caps.revchange?"아직 완전한 한 주가 안 끝났어요. 연재요일별로 순차 표시돼요(수 9/16, 목 9/17 …). 수집 다운수가 전날 누적이라 주 마감 다음날부터 잡힙니다.":"조건에 맞는 작품이 없어요."}</li>`; return; }
   const showRev = caps.revenue || sMode==="revenue";
   board.innerHTML=rows.map((d,i)=>{
     const rk = (caps.revenue||caps.revchange||caps.cohort) ? (d._rk||i+1) : d.r;
