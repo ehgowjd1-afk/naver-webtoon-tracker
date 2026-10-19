@@ -380,3 +380,23 @@ footer a:hover{text-decoration:underline}
 .cotab .q3{color:var(--muted)} .cotab .cn{color:var(--faint); font-size:11px}
 .cotab tr.sel th,.cotab tr.sel td{background:var(--accent-soft, rgba(0,0,0,.04))}
 .cohort .nnote{font-size:11.5px; color:var(--faint); margin-top:10px; line-height:1.5}
+/* 신작 월별: 론칭 주차별 매출 순위 추이 표 (첫 열 고정, 가로 스크롤) */
+.trtab{border-collapse:separate; border-spacing:0; font-size:12.5px; font-variant-numeric:tabular-nums; white-space:nowrap; min-width:100%}
+.trtab th,.trtab td{padding:6px 8px; border-bottom:1px solid var(--border); text-align:center}
+.trtab thead th{font-size:11px; color:var(--faint); font-weight:600; background:var(--surface)}
+.trtab thead th.tk{cursor:pointer; user-select:none} .trtab thead th.tk:hover,.trtab thead th.tk.on{color:var(--accent)}
+.trtab .tn{position:sticky; left:0; z-index:1; background:var(--surface); text-align:left; max-width:190px; overflow:hidden; text-overflow:ellipsis; cursor:pointer; font-weight:600}
+.trtab tbody .tn span{display:block; overflow:hidden; text-overflow:ellipsis} .trtab tbody .tn small{display:block; font-size:10.5px; color:var(--faint); font-weight:400}
+.trtab tbody .tn:hover span{color:var(--accent)}
+.trtab td b{font-weight:700} .trtab td i{display:block; font-style:normal; font-size:10.5px; line-height:1.2}
+.trtab td i.up{color:var(--up)} .trtab td i.dn{color:var(--down)} .trtab td i.rk{color:var(--faint)}
+.trtab td.t3{background:var(--accent-soft)} .trtab td.t3 b{color:var(--accent)}
+.trtab td.t10{background:color-mix(in srgb, var(--accent-soft) 45%, transparent)}
+.trtab td.na{color:var(--faint)}
+.cohort .costat{margin-top:12px} .cohort .costat summary{cursor:pointer; font-size:12.5px; color:var(--muted); font-weight:600; padding:4px 0}
+.cohort .nbasis{display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:-2px 0 8px}
+.cohort .nbasis .chip{height:28px; font-size:12px; padding:0 10px}
+.cohort .nsep{width:1px; height:18px; background:var(--border); margin:0 4px}
+.cohort .nmore{display:block; margin:10px auto 0; border:1px solid var(--border); background:var(--surface); color:var(--muted); font:inherit; font-size:12.5px; font-weight:600; border-radius:9px; padding:6px 14px; cursor:pointer}
+.cohort .nmore:hover{color:var(--accent); border-color:var(--accent)}
+.cohort .nempty{font-size:13px; color:var(--muted); padding:4px 0}

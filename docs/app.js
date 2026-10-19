@@ -128,19 +128,58 @@ function cohortStats(vals){
   const n=a.length, top=a.slice(-10);
   return { n, mean:a.reduce((s,v)=>s+v,0)/n, med:n%2?a[(n-1)/2]:(a[n/2-1]+a[n/2])/2, q3:a[Math.floor(n*0.75)], top10:top.reduce((s,v)=>s+v,0)/top.length, max:a[n-1] };
 }
+/* 신작 월별 패널: 그 달 론칭작의 론칭 주차별 매출 순위 추이(1주차~최대 13주차≈3달, 데이터가 쌓이는 만큼 열이 늘어남).
+   칸 = 그 주차까지 온 작품끼리 매긴 순위(주간: 그 주 거래액 / 누적: 1주차부터 합). ▲▼ = 앞 주차 대비 순위 변화.
+   열 제목을 누르면 그 주차 순위로 줄 정렬(기본 = 가장 최근 열 중 작품 절반 이상이 온 주차). 통계 표는 아래 '통계 보기'로 접어 둠 */
+let TR_BASIS="week", TR_MODE="rank", TR_SORTK=0, TR_ALL=false, TR_MONTH="";
 function renderCohort(){
   const el=document.getElementById("cohort"); if(!el||!LW) return;
+  if(TR_MONTH!==sub){ TR_MONTH=sub; TR_SORTK=0; TR_ALL=false; }
+  const works=cohortRows(sub).map(r=>{ const x=LW.works[r.id], sd=SERIESDET&&SERIESDET[x.pn], up=sd?unitPrice(sd,"comic"):320, w=(x.w||[]).slice(0,13);
+    const deal=w.map(v=>v*up), cum=[]; deal.forEach((v,i)=>cum.push((cum[i-1]||0)+v));
+    return { id:r.id, name:x.t, L:x.L, deal, cum, rank:[] }; });
+  const K=Math.max(0, ...works.map(o=>o.deal.length));
+  for(let k=0;k<K;k++){   // 주차별 순위 — 그 주차까지 온 작품끼리
+    const val=o=>TR_BASIS==="cum"?o.cum[k]:o.deal[k];
+    works.filter(o=>o.deal.length>k).sort((a,b)=>val(b)-val(a)).forEach((o,i)=>{ o.rank[k]=i+1; });
+  }
+  const nAt=k=>works.filter(o=>o.deal.length>k).length;
+  let sk=TR_SORTK; if(!sk||sk>K){ sk=0; for(let k=K;k>=1;k--){ if(nAt(k-1)>=Math.max(1,works.length/2)){ sk=k; break; } } if(!sk) sk=Math.min(1,K); }
+  const latest=o=>o.rank.length?o.rank[o.rank.length-1]:1e9;
+  works.sort((a,b)=>{ const ra=a.rank[sk-1], rb=b.rank[sk-1]; if(ra!=null&&rb!=null) return ra-rb; if(ra!=null) return -1; if(rb!=null) return 1; return latest(a)-latest(b); });
+  const shown=TR_ALL?works:works.slice(0,15);
+  const heat=r=>r==null?"":r<=3?"t3":r<=10?"t10":"";
+  const head=Array.from({length:K},(_,k)=>`<th class="tk ${k+1===sk?"on":""}" data-tk="${k+1}" title="${k+1}주차 순위로 정렬 · ${nAt(k)}개 작품">${k+1}주${k+1===sk?" ▾":""}</th>`).join("");
+  const rowHtml=o=>`<tr><th class="tn" data-tid="${o.id}" title="${esc(o.name)} · 론칭 ${mdShort(o.L)}"><span>${esc(o.name)}</span><small>${mdShort(o.L)}</small></th>${Array.from({length:K},(_,k)=>{
+      const r=o.rank[k]; if(r==null) return `<td class="na">·</td>`;
+      const p=o.rank[k-1], mv=(p!=null&&p!==r)?(p>r?`<i class="up">▲${p-r}</i>`:`<i class="dn">▼${r-p}</i>`):"";
+      const v=TR_BASIS==="cum"?o.cum[k]:o.deal[k];
+      const tip=`${o.name} · ${k+1}주차 ${wonShort(o.deal[k])} · 누적 ${wonShort(o.cum[k])} · ${r}위/${nAt(k)}`;
+      return `<td class="${heat(r)}" title="${esc(tip)}">${TR_MODE==="rank"?`<b>${r}</b>${mv}`:`<b>${wonShort(v)}</b><i class="rk">${r}위</i>`}</td>`; }).join("")}</tr>`;
+  // 통계(접어 둠): 그 달 첫 주·N주 누적 + 월별 비교
   const valsOf=m=>cohortRows(m).map(r=>LW.works[r.id]).map(cohortVals);
   const cur=valsOf(sub);
   const statRows=CO_KEYS.map(([k,lab])=>{ const st=cohortStats(cur.map(o=>o[k])); return st?`<tr><th>${lab}</th><td>${st.n}</td><td>${wonShort(st.mean)}</td><td>${wonShort(st.med)}</td><td>${wonShort(st.q3)}</td><td>${wonShort(st.top10)}</td><td>${wonShort(st.max)}</td></tr>`:""; }).join("");
-  const months=cohortMonths();
   const cmpKeys=CO_KEYS.slice(0,4);
-  const cmpRows=months.map(m=>{ const V=valsOf(m); return `<tr class="${m===sub?"sel":""}"><th>${esc(monthLabel(m))}</th><td>${V.length}</td>${cmpKeys.map(([k])=>{ const st=cohortStats(V.map(o=>o[k])); return st?`<td>${wonShort(st.med)} <span class="q3">/ ${wonShort(st.q3)}</span> <span class="cn">(${st.n})</span></td>`:`<td class="na">–</td>`; }).join("")}</tr>`; }).join("");
-  el.innerHTML=`<div class="lab">${esc(monthLabel(sub))} 론칭 신작 ${cur.length}개 · 같은 시기 거래액</div>
-    <div class="cowrap"><table class="cotab"><thead><tr><th></th><th>작품 수</th><th>평균</th><th>중앙값</th><th>상위 25%</th><th>상위 10개 평균</th><th>최고</th></tr></thead><tbody>${statRows||`<tr><td colspan="7" class="na">아직 첫 주가 지난 작품이 없어요</td></tr>`}</tbody></table></div>
-    <div class="lab" style="margin-top:14px">월별 비교 · 중앙값 / 상위 25% 진입선 (작품 수)</div>
-    <div class="cowrap"><table class="cotab"><thead><tr><th>론칭 월</th><th>작품</th>${cmpKeys.map(([,lab])=>`<th>${lab}</th>`).join("")}</tr></thead><tbody>${cmpRows}</tbody></table></div>
-    <div class="nnote">거래액 = 론칭 후 그 기간 다운로드 증가 × 작품 단가 · 그 기간이 지난 작품만 셈 · 매일 자동 갱신, 주차 기록은 계속 보관 · 다운로드 기록이 2026-09-08부터라 그 전 론칭작은 없어요</div>`;
+  const cmpRows=cohortMonths().map(m=>{ const V=valsOf(m); return `<tr class="${m===sub?"sel":""}"><th>${esc(monthLabel(m))}</th><td>${V.length}</td>${cmpKeys.map(([k])=>{ const st=cohortStats(V.map(o=>o[k])); return st?`<td>${wonShort(st.med)} <span class="q3">/ ${wonShort(st.q3)}</span> <span class="cn">(${st.n})</span></td>`:`<td class="na">–</td>`; }).join("")}</tr>`; }).join("");
+  const chip=(attr,val,cur,lab)=>`<button class="chip" ${attr}="${val}" aria-pressed="${val===cur}">${lab}</button>`;
+  el.innerHTML=`<div class="lab">${esc(monthLabel(sub))} 론칭 신작 ${works.length}개 · 론칭 주차별 매출 순위 추이 (최대 13주 ≈ 3달까지 따라감)</div>
+    <div class="nbasis">${chip("data-tb","week",TR_BASIS,"주간 매출")}${chip("data-tb","cum",TR_BASIS,"누적 매출")}<span class="nsep"></span>${chip("data-tm","rank",TR_MODE,"순위")}${chip("data-tm","deal",TR_MODE,"금액")}</div>
+    ${K?`<div class="cowrap"><table class="trtab"><thead><tr><th class="tn">작품 · 론칭일</th>${head}</tr></thead><tbody>${shown.map(rowHtml).join("")}</tbody></table></div>`:`<div class="nempty">아직 첫 주가 지난 작품이 없어요.</div>`}
+    ${works.length>15?`<button class="nmore" data-tall="1">${TR_ALL?"접기 ▴":`전체 보기 (${works.length}개) ▾`}</button>`:""}
+    <div class="nnote">칸 = 그 주차까지 온 작품끼리 매긴 ${TR_BASIS==="cum"?"누적":"주간"} 매출 순위(▲▼ 앞 주차 대비) · 열 제목을 누르면 그 주차 순위로 정렬 · 진한 칸 = 3위 안, 연한 칸 = 10위 안 · 매출 = 다운로드 증가 × 작품 단가 · 매일 자동 갱신, 주차 기록은 계속 보관(다운로드 기록 2026-09-08~)</div>
+    <details class="costat"><summary>통계 보기 · 평균·중앙값·상위 25% · 월별 비교</summary>
+      <div class="cowrap"><table class="cotab"><thead><tr><th></th><th>작품 수</th><th>평균</th><th>중앙값</th><th>상위 25%</th><th>상위 10개 평균</th><th>최고</th></tr></thead><tbody>${statRows||`<tr><td colspan="7" class="na">아직 첫 주가 지난 작품이 없어요</td></tr>`}</tbody></table></div>
+      <div class="lab" style="margin-top:12px">월별 비교 · 중앙값 / 상위 25% 진입선 (작품 수)</div>
+      <div class="cowrap"><table class="cotab"><thead><tr><th>론칭 월</th><th>작품</th>${cmpKeys.map(([,lab])=>`<th>${lab}</th>`).join("")}</tr></thead><tbody>${cmpRows}</tbody></table></div>
+    </details>`;
+  el.onclick=e=>{
+    const tb=e.target.closest("[data-tb]"); if(tb){ TR_BASIS=tb.dataset.tb; renderCohort(); return; }
+    const tm=e.target.closest("[data-tm]"); if(tm){ TR_MODE=tm.dataset.tm; renderCohort(); return; }
+    const tk=e.target.closest("[data-tk]"); if(tk){ TR_SORTK=+tk.dataset.tk; renderCohort(); return; }
+    if(e.target.closest("[data-tall]")){ TR_ALL=!TR_ALL; renderCohort(); return; }
+    const tn=e.target.closest("[data-tid]"); if(tn){ const id=+tn.dataset.tid, row=viewRows().find(d=>d.id===id); if(row) openModal(row); }
+  };
 }
 /* 월별 신작 순위 기준(정렬 칩). 거래액(론칭 주차) 외에 유지율·다운로드·관심 수·댓글·앱 주간 순위.
    coMetric: 높을수록 좋은 값(앱 주간 순위만 낮을수록 → asc). 없으면 null = 목록 맨 아래 '–' */

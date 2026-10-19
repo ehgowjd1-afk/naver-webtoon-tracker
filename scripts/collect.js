@@ -526,7 +526,7 @@ function updateRevenueHistory(dir, date, opts){
   fs.writeFileSync(path.join(dir,"revenue_history.json"), JSON.stringify(rh));
   return { dates:rh.dates.length, works:Object.keys(rh.works).length, wrote, lastFull:rh.lastFull||null };
 }
-/* 신작 론칭 주차별 다운로드 → launch_weeks.json {since, updated, works:{titleId:{t, L, pn, w:[1주차 다운 증가, 2주차, …최대 12]}}}
+/* 신작 론칭 주차별 다운로드 → launch_weeks.json {since, updated, works:{titleId:{t, L, pn, w:[1주차 다운 증가, 2주차, …최대 13(약 3달)]}}}
  * revenue_history는 150일만 남아서, 신작 월별 비교(사이트 '신작 월별')가 오래 가도록 주차 값만 따로 영구 보관.
  * N주차 = 론칭일 L부터 7일씩, 다운 = D(L+7N) − D(L+7(N−1)) (수집일 값 = 전날까지 누적). 신작 시리즈는 론칭 1~3일 뒤 첫 기록이라
  * 첫 기록이 론칭 뒤 7일 안이면 론칭일 누적 = 0. 빈 칸은 앞뒤 실제값 보간(프론트 dlAt과 같음). 다시 계산되면 새 값, 기록이 지워진 옛 주차는 저장값 유지.
@@ -552,7 +552,7 @@ function updateLaunchWeeks(dir, details, idMap){
     const lag=dayN(dates[fi])-dayN(L), fresh=lag>0&&lag<=7;
     const at=dt=>{ if(dt===L&&fresh) return 0; const i=idx[dt]; if(i==null||i<fi) return null; return dlAt(w,i); };
     const old=(lw.works[id]&&String(lw.works[id].pn)===String(pn))?lw.works[id].w:[], wk=[];
-    for(let k=1;k<=12;k++){ const a=at(addD(L,7*(k-1))), b=at(addD(L,7*k)); const v=(a!=null&&b!=null)?b-a:(old[k-1]!=null?old[k-1]:null); if(v==null) break; wk.push(v); }
+    for(let k=1;k<=13;k++){ const a=at(addD(L,7*(k-1))), b=at(addD(L,7*k)); const v=(a!=null&&b!=null)?b-a:(old[k-1]!=null?old[k-1]:null); if(v==null) break; wk.push(v); }
     if(!wk.length) continue;
     lw.works[id]={t:name, L, pn:+pn, w:wk}; updated++;
   }
