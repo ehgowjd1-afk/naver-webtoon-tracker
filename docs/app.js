@@ -131,6 +131,47 @@ function cohortStats(vals){
 /* 신작 월별 패널: 그 달 론칭작의 론칭 주차별 매출 순위 추이(1주차~최대 13주차≈3달, 데이터가 쌓이는 만큼 열이 늘어남).
    칸 = 그 주차까지 온 작품끼리 매긴 순위(주간: 그 주 거래액 / 누적: 1주차부터 합). ▲▼ = 앞 주차 대비 순위 변화.
    열 제목을 누르면 그 주차 순위로 줄 정렬(기본 = 가장 최근 열 중 작품 절반 이상이 온 주차). 통계 표는 아래 '통계 보기'로 접어 둠 */
+/* 신작 월별 그래프 ① 순위 추이(범프 차트): 표 위쪽 8개 작품의 주차별 순위 선. 위가 1위, 15위 밖은 맨 아래 줄에 흐리게.
+   색 = 검증된 8색(--s1~8)을 론칭일 순으로 배정(정렬을 바꿔도 같은 작품이 남으면 색 순서 기준은 그대로) · 범례 + 마우스 올리면 그 작품만 강조·말풍선 */
+function bumpHtml(works, K, sk, basis){
+  const top=works.filter(o=>o.rank[sk-1]!=null).slice(0,8);
+  if(K<2||top.length<2) return "";
+  const slot=new Map([...top].sort((a,b)=>a.L<b.L?-1:a.L>b.L?1:a.id-b.id).map((o,i)=>[o.id,i+1]));
+  const W=760, H=310, pl=48, pr=18, pt=14, pb=38, R=15;
+  const x=k=>K===1?(pl+W-pr)/2:pl+(k-1)*(W-pl-pr)/(K-1);
+  const y=r=>pt+(Math.min(r,R+1)-1)*(H-pt-pb)/R;
+  const grid=[1,5,10,15].map(r=>`<line class="grid" x1="${pl}" x2="${W-pr}" y1="${y(r)}" y2="${y(r)}"/><text class="ax" x="${pl-8}" y="${y(r)+4}" text-anchor="end">${r}위</text>`).join("")
+    +`<text class="ax" x="${pl-8}" y="${y(R+1)+4}" text-anchor="end">15위 밖</text>`;
+  const xs=Array.from({length:K},(_,i)=>`<text class="ax ${i+1===sk?"axon":""}" x="${x(i+1)}" y="${H-8}" text-anchor="middle">${i+1}주</text>`).join("");
+  const band=`<rect class="band" x="${x(sk)-14}" y="${pt-8}" width="28" height="${H-pt-pb+16}" rx="6"/>`;
+  const ser=top.map(o=>{
+    const c=`var(--s${slot.get(o.id)})`, pts=[];
+    for(let k=1;k<=K;k++){ const r=o.rank[k-1]; if(r==null) break; pts.push([k,r]); }
+    const d=pts.map(([k,r],i)=>`${i?"L":"M"}${x(k).toFixed(1)},${y(r).toFixed(1)}`).join(" ");
+    const dots=pts.map(([k,r])=>`<circle class="${r>R?"out":""}" cx="${x(k).toFixed(1)}" cy="${y(r).toFixed(1)}" r="4" fill="${c}"/><circle class="hit" data-sid="${o.id}" data-k="${k}" cx="${x(k).toFixed(1)}" cy="${y(r).toFixed(1)}" r="11"/>`).join("");
+    return `<g class="ser" data-sid="${o.id}"><path d="${d}" stroke="${c}"/>${dots}</g>`; }).join("");
+  const leg=top.map(o=>`<span data-sid="${o.id}"><i style="background:var(--s${slot.get(o.id)})"></i>${esc(o.name)} <small>${o.rank[sk-1]}위</small></span>`).join("");
+  return `<div class="bump" id="bump"><div class="leg">${leg}</div><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="론칭 주차별 ${basis==="cum"?"누적":"주간"} 매출 순위 추이 상위 ${top.length}개">${band}${grid}${xs}${ser}</svg><div class="tip" hidden></div></div>`;
+}
+function wireBump(works){
+  const box=document.getElementById("bump"); if(!box) return;
+  const tip=box.querySelector(".tip"), by=new Map(works.map(o=>[String(o.id),o]));
+  const hl=id=>{ box.classList.toggle("hl",!!id); box.querySelectorAll(".ser").forEach(g=>g.classList.toggle("on",g.dataset.sid===id)); };
+  box.onmouseover=e=>{ const t=e.target.closest("[data-sid]"); hl(t?t.dataset.sid:null);
+    if(t&&t.dataset.k){ const o=by.get(t.dataset.sid), k=+t.dataset.k-1, br=box.getBoundingClientRect(), cr=t.getBoundingClientRect();
+      tip.innerHTML=`<b>${esc(o.name)}</b>${k+1}주차 ${o.rank[k]}위 · 그 주 ${wonShort(o.deal[k])} · 누적 ${wonShort(o.cum[k])}`;
+      tip.hidden=false; const left=Math.min(cr.left-br.left+12, br.width-tip.offsetWidth-4); tip.style.left=Math.max(0,left)+"px"; tip.style.top=(cr.top-br.top-tip.offsetHeight-6)+"px"; }
+    else tip.hidden=true; };
+  box.onmouseleave=()=>{ hl(null); tip.hidden=true; };
+}
+/* 그래프 ② 표 안 미니 그래프: 작품마다 주차별 그 주 매출의 모양(작품마다 자기 최고점 기준 — 오르는지 꺾이는지) */
+function trendSpark(o){
+  const v=o.deal; if(v.length<2) return "";
+  const W=72, H=24, p=4, mx=Math.max(...v), mn=Math.min(...v), rng=(mx-mn)||1;
+  const pts=v.map((d,i)=>[p+i*(W-2*p)/(v.length-1), H-p-(d-mn)/rng*(H-2*p)]);
+  const last=pts[pts.length-1];
+  return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" aria-hidden="true"><path d="${pts.map((q,i)=>(i?"L":"M")+q[0].toFixed(1)+","+q[1].toFixed(1)).join(" ")}"/><circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3.5"/></svg>`;
+}
 let TR_BASIS="week", TR_MODE="rank", TR_SORTK=0, TR_ALL=false, TR_MONTH="";
 function renderCohort(){
   const el=document.getElementById("cohort"); if(!el||!LW) return;
@@ -150,7 +191,7 @@ function renderCohort(){
   const shown=TR_ALL?works:works.slice(0,15);
   const heat=r=>r==null?"":r<=3?"t3":r<=10?"t10":"";
   const head=Array.from({length:K},(_,k)=>`<th class="tk ${k+1===sk?"on":""}" data-tk="${k+1}" title="${k+1}주차 순위로 정렬 · ${nAt(k)}개 작품">${k+1}주${k+1===sk?" ▾":""}</th>`).join("");
-  const rowHtml=o=>`<tr><th class="tn" data-tid="${o.id}" title="${esc(o.name)} · 론칭 ${mdShort(o.L)}"><span>${esc(o.name)}</span><small>${mdShort(o.L)}</small></th>${Array.from({length:K},(_,k)=>{
+  const rowHtml=o=>`<tr><th class="tn" data-tid="${o.id}" title="${esc(o.name)} · 론칭 ${mdShort(o.L)}"><span>${esc(o.name)}</span><small>${mdShort(o.L)}</small></th><td class="sp" title="주차별 그 주 매출 모양">${trendSpark(o)}</td>${Array.from({length:K},(_,k)=>{
       const r=o.rank[k]; if(r==null) return `<td class="na">·</td>`;
       const p=o.rank[k-1], mv=(p!=null&&p!==r)?(p>r?`<i class="up">▲${p-r}</i>`:`<i class="dn">▼${r-p}</i>`):"";
       const v=TR_BASIS==="cum"?o.cum[k]:o.deal[k];
@@ -165,7 +206,8 @@ function renderCohort(){
   const chip=(attr,val,cur,lab)=>`<button class="chip" ${attr}="${val}" aria-pressed="${val===cur}">${lab}</button>`;
   el.innerHTML=`<div class="lab">${esc(monthLabel(sub))} 론칭 신작 ${works.length}개 · 론칭 주차별 매출 순위 추이 (최대 13주 ≈ 3달까지 따라감)</div>
     <div class="nbasis">${chip("data-tb","week",TR_BASIS,"주간 매출")}${chip("data-tb","cum",TR_BASIS,"누적 매출")}<span class="nsep"></span>${chip("data-tm","rank",TR_MODE,"순위")}${chip("data-tm","deal",TR_MODE,"금액")}</div>
-    ${K?`<div class="cowrap"><table class="trtab"><thead><tr><th class="tn">작품 · 론칭일</th>${head}</tr></thead><tbody>${shown.map(rowHtml).join("")}</tbody></table></div>`:`<div class="nempty">아직 첫 주가 지난 작품이 없어요.</div>`}
+    ${bumpHtml(works, K, sk, TR_BASIS)}
+    ${K?`<div class="cowrap"><table class="trtab"><thead><tr><th class="tn">작품 · 론칭일</th><th class="sp" title="주차별 그 주 매출 모양(작품마다 자기 최고점 기준)">흐름</th>${head}</tr></thead><tbody>${shown.map(rowHtml).join("")}</tbody></table></div>`:`<div class="nempty">아직 첫 주가 지난 작품이 없어요.</div>`}
     ${works.length>15?`<button class="nmore" data-tall="1">${TR_ALL?"접기 ▴":`전체 보기 (${works.length}개) ▾`}</button>`:""}
     <div class="nnote">칸 = 그 주차까지 온 작품끼리 매긴 ${TR_BASIS==="cum"?"누적":"주간"} 매출 순위(▲▼ 앞 주차 대비) · 열 제목을 누르면 그 주차 순위로 정렬 · 진한 칸 = 3위 안, 연한 칸 = 10위 안 · 매출 = 다운로드 증가 × 작품 단가 · 매일 자동 갱신, 주차 기록은 계속 보관(다운로드 기록 2026-09-08~)</div>
     <details class="costat"><summary>통계 보기 · 평균·중앙값·상위 25% · 월별 비교</summary>
@@ -173,6 +215,7 @@ function renderCohort(){
       <div class="lab" style="margin-top:12px">월별 비교 · 중앙값 / 상위 25% 진입선 (작품 수)</div>
       <div class="cowrap"><table class="cotab"><thead><tr><th>론칭 월</th><th>작품</th>${cmpKeys.map(([,lab])=>`<th>${lab}</th>`).join("")}</tr></thead><tbody>${cmpRows}</tbody></table></div>
     </details>`;
+  wireBump(works);
   el.onclick=e=>{
     const tb=e.target.closest("[data-tb]"); if(tb){ TR_BASIS=tb.dataset.tb; renderCohort(); return; }
     const tm=e.target.closest("[data-tm]"); if(tm){ TR_MODE=tm.dataset.tm; renderCohort(); return; }
