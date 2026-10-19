@@ -528,12 +528,13 @@ function updateRevenueHistory(dir, date, opts){
 }
 /* 신작 론칭 주차별 다운로드 → launch_weeks.json {since, updated, works:{titleId:{t, L, pn, w:[1주차 다운 증가, 2주차, …최대 13(약 3달)]}}}
  * revenue_history는 150일만 남아서, 신작 월별 비교(사이트 '신작 월별')가 오래 가도록 주차 값만 따로 영구 보관.
- * N주차 = 론칭일 L부터 7일씩, 다운 = D(L+7N) − D(L+7(N−1)) (수집일 값 = 전날까지 누적). 신작 시리즈는 론칭 1~3일 뒤 첫 기록이라
+ * N주차 = 론칭 다음날 L1(첫 연재요일)부터 7일씩, 다운 = D(L1+7N) − D(L1+7(N−1)) (수집일 값 = 전날까지 누적) — 사이트 연재요일 주간 거래액과 같은 구간. 신작 시리즈는 론칭 1~3일 뒤 첫 기록이라
  * 첫 기록이 론칭 뒤 7일 안이면 론칭일 누적 = 0. 빈 칸은 앞뒤 실제값 보간(프론트 dlAt과 같음). 다시 계산되면 새 값, 기록이 지워진 옛 주차는 저장값 유지.
  * 판본(pn) = series_extra.link(웹툰 총화로 고른 판본) → 없으면 검색연동 map의 코믹 중 다운수 있는 것 */
 function updateLaunchWeeks(dir, details, idMap){
   const read=(f,d)=>{ try{ return JSON.parse(fs.readFileSync(path.join(dir,f),"utf8")); }catch(e){ return d; } };
-  const lw=read("launch_weeks.json",{since:"2026-09-02",works:{}}), rh=read("revenue_history.json",null), sd=read("series_details.json",{}), extra=read("series_extra.json",{});
+  let lw=read("launch_weeks.json",{v:2,since:"2026-09-02",works:{}}); if(lw.v!==2) lw={v:2,since:lw.since||"2026-09-02",works:{}};   // v2 = 연재요일 주(론칭 다음날 시작)로 맞춤 — 옛 값(론칭일 시작)은 버림
+  const rh=read("revenue_history.json",null), sd=read("series_details.json",{}), extra=read("series_extra.json",{});
   if(!rh||!rh.dates) return null;
   const dates=rh.dates, idx={}; dates.forEach((x,i)=>idx[x]=i);
   const dayN=s=>{ const p=s.split("-").map(Number); return Date.UTC(p[0],p[1]-1,p[2])/864e5; };
@@ -550,9 +551,10 @@ function updateLaunchWeeks(dir, details, idMap){
     const w=pn&&rh.works[pn]; if(!w){ skipped++; continue; }
     const fi=w.dl.findIndex(v=>v!=null); if(fi<0) continue;
     const lag=dayN(dates[fi])-dayN(L), fresh=lag>0&&lag<=7;
-    const at=dt=>{ if(dt===L&&fresh) return 0; const i=idx[dt]; if(i==null||i<fi) return null; return dlAt(w,i); };
+    const L1=addD(L,1);   // 론칭은 연재요일 하루 전 밤 → N주차 = 론칭 다음날(첫 연재요일)부터 7일씩 = 사이트 연재요일 주와 같은 구간
+    const at=dt=>{ if(fresh&&dt<=L1) return 0; const i=idx[dt]; if(i==null||i<fi) return null; return dlAt(w,i); };   // 데뷔 주 시작 = 0(론칭 밤 다운로드도 1주차에 넣음)
     const old=(lw.works[id]&&String(lw.works[id].pn)===String(pn))?lw.works[id].w:[], wk=[];
-    for(let k=1;k<=13;k++){ const a=at(addD(L,7*(k-1))), b=at(addD(L,7*k)); const v=(a!=null&&b!=null)?b-a:(old[k-1]!=null?old[k-1]:null); if(v==null) break; wk.push(v); }
+    for(let k=1;k<=13;k++){ const a=at(addD(L1,7*(k-1))), b=at(addD(L1,7*k)); const v=(a!=null&&b!=null)?b-a:(old[k-1]!=null?old[k-1]:null); if(v==null) break; wk.push(v); }
     if(!wk.length) continue;
     lw.works[id]={t:name, L, pn:+pn, w:wk}; updated++;
   }

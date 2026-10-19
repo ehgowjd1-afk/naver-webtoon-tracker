@@ -396,10 +396,21 @@ function weeklyRevenueWeeks(name, dow, selfPn){
   const w=REVHIST.works[rv.pn]; if(!w) return [];
   const dates=REVHIST.dates||[], k=rv.up*0.9*0.6, dIdx={};
   dates.forEach((dt,i)=>dIdx[dt]=i);
+  // 신작 데뷔 주: 시리즈 상품이 론칭과 함께 새로 생겨 론칭 1~7일 뒤에야 첫 기록이 잡힘 → 그 전 칸은 '미수집'이 아니라 0.
+  // 론칭일(=연재요일 하루 전 밤 공개)·그다음 날에 시작하는 주는 시작값 0으로 계산(첫 기록이 론칭 뒤 7일 안일 때만 — 기존 작품은 해당 없음)
+  const tid=selfPn?null:(LOOKUP.name&&LOOKUP.name[name]), lm=tid&&DETAILS&&DETAILS[tid]?String(DETAILS[tid].launch||"").match(/(\d{2})\.(\d{2})\.(\d{2})/):null;
+  const L=lm?`20${lm[1]}-${lm[2]}-${lm[3]}`:null, fi=w.dl.findIndex(v=>v!=null);
+  const fresh=!!(L&&fi>=0&&dayNum(dates[fi])-dayNum(L)>0&&dayNum(dates[fi])-dayNum(L)<=7);
   const weeks=[];
+  if(fresh && dIdx[addDays(L,1)]==null && weekStart(addDays(L,1),dow)===addDays(L,1)){   // 첫 연재요일이 다운로드 기록 시작(9/9)보다 앞인 신작: 데뷔 주도 시작값 0으로
+    const S=addDays(L,1), iE=dIdx[addDays(S,7)], b=iE!=null?dlAt(w,iE,dates):null;
+    if(b){ const dDl=b.v, rev=dDl*k, ep=w.ep[iE]||rv.ep||1; weeks.push({ws:S, we:addDays(S,6), rev, ep, perRev:rev/ep, deal:dDl*rv.up, dDl, est:b.est}); }
+  }
   for(let iS=0; iS<dates.length; iS++){ const S=dates[iS]; if(weekStart(S,dow)!==S) continue;   // 연재요일 경계 수집일
     const iE=dIdx[addDays(S,7)]; if(iE==null) continue;                      // S+7 = 다음 연재요일(=주 마감 반영 수집일)
-    const a=dlAt(w,iS,dates), b=dlAt(w,iE,dates); if(!a||!b) continue;       // 경계 값이 없으면(수집 전/데이터 밖) 미완성
+    let a=dlAt(w,iS,dates); const b=dlAt(w,iE,dates);
+    if(fresh && S>=L && S<=addDays(L,1)) a={v:0,est:false};            // 신작 데뷔 주 시작값 = 0(론칭 밤 다운로드도 데뷔 주에 넣음 — 신작 월별 1주차와 같은 값)
+    if(!a||!b) continue;       // 경계 값이 없으면(수집 전/데이터 밖) 미완성
     const dDl=b.v-a.v, rev=dDl*k, ep=w.ep[iE]||w.ep[iS]||rv.ep||1;
     weeks.push({ws:S, we:addDays(S,6), rev, ep, perRev:rev/ep, deal:dDl*rv.up, dDl, est:a.est||b.est});  // deal=주단위 거래액=(이번주누적−지난주누적 다운수)×단가
   }
@@ -698,9 +709,10 @@ function launchWeekDeals(d){
   const dates=REVHIST.dates||[], idx={}; dates.forEach((x,i)=>idx[x]=i);
   const fi=w.dl.findIndex(v=>v!=null); if(fi<0) return [];
   const lag=dayNum(dates[fi])-dayNum(L), fresh=lag>0&&lag<=7;   // 론칭 뒤 7일 안에 처음 잡힌 새 상품
-  const at=dt=>{ if(dt===L && fresh) return {v:0,est:false}; const i=idx[dt]; if(i==null||i<fi) return null; return dlAt(w,i,dates); };
+  const L1=addDays(L,1);   // 연재요일 주(론칭 다음날 시작)에 맞춤 — 일반 주간 거래액·신작 월별과 같은 구간
+  const at=dt=>{ if(fresh && dt<=L1) return {v:0,est:false}; const i=idx[dt]; if(i==null||i<fi) return null; return dlAt(w,i,dates); };
   const out=[];
-  for(let k=1;k<=6;k++){ const a=at(addDays(L,7*(k-1))), b=at(addDays(L,7*k)); if(!a||!b) break; const dDl=b.v-a.v; out.push({k, dDl, deal:dDl*rv.up, est:a.est||b.est}); }
+  for(let k=1;k<=6;k++){ const a=at(addDays(L1,7*(k-1))), b=at(addDays(L1,7*k)); if(!a||!b) break; const dDl=b.v-a.v; out.push({k, dDl, deal:dDl*rv.up, est:a.est||b.est}); }
   return out;
 }
 function renderNtop(){
@@ -714,7 +726,7 @@ function renderNtop(){
     items=viewRows().map(d=>{ const W=launchWeekDeals(d); if(W.length<N) return null; const cur=W[N-1], prev=W[N-2];
       const v=NTOP_MODE==="cum"?W.slice(0,N).reduce((s,x)=>s+x.deal,0):cur.deal;
       const L=launchIso(d);
-      return {d, v, est:W.slice(0,N).some(x=>x.est), ch:NTOP_MODE==="cum"?null:(prev?cur.deal-prev.deal:null), chLab:`${N-1}주차`, tip:NTOP_MODE==="cum"?`론칭 ${mdShort(L)} · 1~${N}주 ${mdShort(L)}~${mdShort(addDays(L,7*N-1))}`:`론칭 ${mdShort(L)} · ${N}주차 ${mdShort(addDays(L,7*(N-1)))}~${mdShort(addDays(L,7*N-1))}`}; }).filter(x=>x&&x.v>0);
+      return {d, v, est:W.slice(0,N).some(x=>x.est), ch:NTOP_MODE==="cum"?null:(prev?cur.deal-prev.deal:null), chLab:`${N-1}주차`, tip:NTOP_MODE==="cum"?`론칭 ${mdShort(L)} · 1~${N}주 ${mdShort(addDays(L,1))}~${mdShort(addDays(L,7*N))}`:`론칭 ${mdShort(L)} · ${N}주차 ${mdShort(addDays(L,7*(N-1)+1))}~${mdShort(addDays(L,7*N))}`}; }).filter(x=>x&&x.v>0);
   }
   items.sort((a,b)=>b.v-a.v);
   NTOP=NTOP_ALL?items:items.slice(0,10);
