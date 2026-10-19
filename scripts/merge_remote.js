@@ -96,4 +96,30 @@ for (const [name, fn] of FILES) {
     if (n) { fs.writeFileSync(path.join(DATA, name), JSON.stringify(mine)); out[name] = n; }
   } catch (e) { console.error("merge 실패(그대로 둠):", name, e.message); }
 }
+// 앱 장르 주간 app_genre/{주차}.json: 장르마다 폰 결과(100위·순위변동)가 검색 위젯 결과(45위)보다 우선.
+// 클라우드 수집이 폰 결과가 올라가기 전에 시작하면 위젯 45위로 덮던 문제(2026-10-19 실제 발생) 방지. index.json은 주차 합집합
+function mergeAppGenre(mine, rem) {
+  let n = 0; mine.src = mine.src || {}; mine.charts = mine.charts || {};
+  for (const g in (rem.charts || {})) {
+    const rs = (rem.src || {})[g], ms = mine.src[g];
+    if (!mine.charts[g] || (rs === "phone" && ms !== "phone")) { mine.charts[g] = rem.charts[g]; mine.src[g] = rs; n++; }
+  }
+  return n;
+}
+try {
+  const ls = (cmd) => { try { return execSync(cmd).toString("utf8").split(/\r?\n/).filter(Boolean); } catch (e) { return []; } };
+  const remFiles = ls(`git -C "${ROOT}" ls-tree --name-only ${REF} docs/data/app_genre/`).map((p) => p.split("/").pop());
+  for (const f of remFiles) {
+    const name = `app_genre/${f}`, rem = remoteJSON(name), mine = localJSON(name);
+    if (!rem) continue;
+    if (!mine) { fs.writeFileSync(path.join(DATA, name), JSON.stringify(rem)); out[name] = "원격 파일 가져옴"; continue; }
+    if (f === "index.json") {
+      const weeks = [...new Set([...(mine.weeks || []), ...(rem.weeks || [])])].sort();
+      if (weeks.length !== (mine.weeks || []).length) { mine.weeks = weeks; mine.latest = weeks[weeks.length - 1]; mine.genres = mine.genres || rem.genres; fs.writeFileSync(path.join(DATA, name), JSON.stringify(mine)); out[name] = "주차 합침"; }
+      continue;
+    }
+    const n = mergeAppGenre(mine, rem);
+    if (n) { fs.writeFileSync(path.join(DATA, name), JSON.stringify(mine)); out[name] = n; }
+  }
+} catch (e) { console.error("merge 실패(그대로 둠): app_genre", e.message); }
 console.log("원격과 합침:", JSON.stringify(out));
