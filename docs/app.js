@@ -7,6 +7,7 @@ const SERIES_CATNAMES = { comic:["전체장르","소년","순정","드라마","�
 const SERIES_PLATS = [["web","웹"],["mobile","모바일"]];
 
 let APP=null, WEEKDAY=null, SERIES=null, PROMO=null, LOOKUP={id:{},name:{}}, WEEKS=[];
+let ORIGINS=null;   // 원작 웹소설 연재처(data/origins.json, scripts/collect_origins.js)
 let AGEN=null, AGEN_IDX=null, agenLoading=null, AGENH=null, agenhLoading=null;   // 앱 장르 주간랭킹(data/app_genre/) — 탭 열 때 불러옴
 const AGEN_GENRES=["판타지·무협","액션","드라마","로맨스","스릴러","일상·개그"];
 let APPWD=null, APPWDH=null, appwdLoading=null;
@@ -24,8 +25,9 @@ let SERIESDET=null, seriesDetLoading=null, REVHIST=null, revHistLoading=null, SE
 const DAILYPLUS=new Set();
 
 const F_MOVE=[["all","전체"],["up","상승"],["down","하락"]];
-const F_APP=[["all","전체"],["up","상승"],["down","하락"],["new","신작·진입"],["streak","연속기록"],["rest","휴재"]];
-const F_MIN=[["all","전체"]];
+const F_APP=[["all","전체"],["up","상승"],["down","하락"],["new","신작·진입"],["streak","연속기록"],["rest","휴재"],["orig","원작"]];
+const F_MIN=[["all","전체"],["orig","원작"]];
+const F_ONE=[["all","전체"]];   // 시리즈 상품 목록(원작 필터 의미 없음)
 const S_MOVE=[["rank","순위순"],["up","상승폭"],["down","하락폭"]];
 const S_APP=[["rank","순위순"],["up","상승폭"],["down","하락폭"],["revenue","시리즈 거래추정순"]];
 const dot = d => (d||"").replace(/-/g,".");
@@ -68,7 +70,7 @@ const SOURCES = {
   weekday: { label:"요일별", variants:[["app","앱"],["web","웹"]], subs:()=>variant==="app"?APPWD_SUBS:WEEKDAYS, data:(v,s)=>v==="app"?(APPWD&&APPWD.tabs&&APPWD.tabs[s+gsuf()]):(WEEKDAY&&WEEKDAY.web&&WEEKDAY.web[s]), caps:{badge:1,gsort:1}, filters:F_MIN, get sorts(){ return variant==="app"?GSORTS:[]; }, note:v=>v==="app"?(APPWD&&APPWD.date?`${dot((APPWD.tabDates&&APPWD.tabDates[sub+gsuf()])||APPWD.date)} · 앱 ${(GSORTS.find(x=>x[0]===sMode)||GSORTS[0])[1]}(폰 화면) · 매일`:"앱 인기순 · 아직 데이터 없음"):`${dot(WEEKDAY.date)} · 요일별 인기순 · 웹(PC) · 자동` },
   done:    { label:"완결", variants:null, subs:()=>doneSubs(), data:(v,s)=>doneWorkSet(s), caps:{revenue:1,badge:1,done:1}, filters:F_MIN, sorts:[["fav","관심수순"],["total","총거래액순"],["per","회차당순"]], note:()=>`완결된 웹툰 · 장르·신작·성인 목록에서 옮겨 왔어요` },
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][platform]&&SERIES[v][platform][scat]&&SERIES[v][platform][scat][s], caps:{move:1,tiles:1,series:1,badge:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · ${platform==="web"?"웹(PC)":"모바일"} · ${scat} · 자동` },
-  promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_MIN, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
+  promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_ONE, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
   revenue: { label:"매출순", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revenue:1,badge:1}, filters:F_MIN, sorts:[["per","회차당순"],["total","총거래액순"],["deal","주단위거래액순"]], note:()=>`시리즈 거래 추정 · 단가=(대여×0.9+소장×0.1)×100 · 총거래액=다운수×단가 · 회차당=총거래액×0.9×0.6÷시리즈 회차수 · 주단위거래액=이번주−지난주 누적` },
   revchange:{ label:"매출 변동", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revchange:1,badge:1}, filters:F_MIN, sorts:[["gain","거래액 많은 순"],["loss","적은 순"]], note:()=>`주단위 거래액 · ${revWeekLabel()} · 이번주−지난주 누적 거래액 (연재요일 기준)` },
   cohort:  { label:"신작 월별", variants:null, subs:()=>{ const ms=cohortMonths(); return ms.length?ms.map(m=>[m,monthLabel(m)]):[[isoToday().slice(0,7),"불러오는 중"]]; }, data:(v,s)=>cohortRows(s), caps:{cohort:1,badge:1}, filters:F_MIN, sorts:CO_SORTS, note:()=>`론칭 월별 신작 성적 · 같은 시기(론칭 후 N주) 거래액 비교 · 아래 목록은 기준을 골라 그 달 순위 · 매일 자동 갱신` },
@@ -281,6 +283,7 @@ async function boot(){
   wsel.value=idx.latest;
   wsel.addEventListener("change", async ()=>{ try{ APP=await fetchJSON(`data/${wsel.value}.json`); if(src==="app"){ renderSubnav(); renderView(); } }catch(e){} });
 
+  fetchJSON("data/origins.json").then(d=>{ ORIGINS=d; if(src && !SOURCES[src].caps.series) renderList(); }).catch(()=>{ ORIGINS={works:{}}; });
   renderGroupNav();
   document.getElementById("groupnav").addEventListener("click", e=>{ const b=e.target.closest("[data-grp]"); if(b) selectGroup(b.dataset.grp); });
   document.getElementById("srcnav").addEventListener("click", e=>{ const b=e.target.closest("[data-src]"); if(b) selectSrc(b.dataset.src); });
@@ -772,9 +775,13 @@ function moveHtml(m){
   if(m<0) return `<span class="move m-down ${Math.abs(m)>=10?"m-big":""}"><span class="arw">▼</span>${Math.abs(m)}</span>`;
   return `<span class="move m-same">—</span>`;
 }
+const ORIG_P={series:"네이버 시리즈",munpia:"문피아",kakao:"카카오페이지",ridi:"리디"};
+const origOf = id => (id!=null && ORIGINS && ORIGINS.works && ORIGINS.works[id]) || null;
+const isOrig = id => !!(origOf(id) || (id!=null && DETAILS && DETAILS[id] && DETAILS[id].novel));
 function badgeHtml(d){
   let h=""; const b=d.b||[];
   if(DAILYPLUS.has(d.id)) h+=`<span class="badge b-daily">매일+</span>`;
+  if(!SOURCES[src].caps.series && isOrig(d.id)){ const o=origOf(d.id), ps=o&&o.h&&o.h.length?o.h.map(x=>ORIG_P[x.p]||x.p).join("·"):""; h+=`<span class="badge b-orig" title="${esc("원작 웹소설"+(o&&o.a&&o.a.length?" · "+o.a.join(", "):"")+(ps?" · "+ps:""))}">원작</span>`; }
   if(d.s>0) h+=`<span class="badge b-streak">${d.r===1?"연속 "+d.s+"주 1위":"연속 "+d.s+"주"}</span>`;
   if(b.includes("1위탈환")) h+=`<span class="badge b-enter">1위 탈환</span>`;
   if(b.includes("신작")) h+=`<span class="badge b-new">신작</span>`;
@@ -800,6 +807,7 @@ function renderList(){
     if(fMode==="new") return d.b.includes("신작")||d.b.includes("진입")||d.b.includes("재진입");
     if(fMode==="streak") return d.s>0;
     if(fMode==="rest") return d.b.includes("휴재");
+    if(fMode==="orig") return isOrig(d.id);
     return true;
   });
   if(caps.cohort){   // 신작 월별: 고른 기간(첫 주·N주 누적) 거래액 큰 순, 그 기간이 안 지난 작품은 뒤로
@@ -891,7 +899,15 @@ function ensureDetails(){ if(DETAILS) return Promise.resolve(DETAILS); if(!detai
 function ensureHistory(){ if(HISTORY) return Promise.resolve(HISTORY); if(!historyLoading) historyLoading=fetchJSON("data/history.json").then(h=>HISTORY=h).catch(()=>HISTORY={dates:[],series:{}}); return historyLoading; }
 function buildKwIndex(){ KWINDEX={}; for(const id in DETAILS){ for(const kw of (DETAILS[id].k||[])){ (KWINDEX[kw]||(KWINDEX[kw]=[])).push(Number(id)); } } }
 
-function detailHtml(det, name){
+function origHtml(id, det){
+  const o=origOf(id); if(!o && !(det&&det.novel)) return "";
+  const au=o&&o.a&&o.a.length?`<span class="oau">원작 ${esc(o.a.join(", "))}</span>`:"";
+  const links=(o&&o.h||[]).map(h=>{ const meta=[h.n?h.n.toLocaleString()+"화":(h.v?h.v+"권":""), h.d?"완결":"", h.ad?"19금":""].filter(Boolean).join(" · "); return `<a class="olink" href="${esc(h.u)}" target="_blank" rel="noopener noreferrer" title="${esc(h.t)}">${esc(ORIG_P[h.p]||h.p)}${meta?` <span class="ometa">${esc(meta)}</span>`:""}</a>`; }).join("");
+  const none=(!o||!(o.ck||[]).length)?`<span class="onone">연재처 확인 전</span>`:(!links?`<span class="onone">${esc((o.ck||[]).map(p=>ORIG_P[p]||p).join("·"))}에서 못 찾음</span>`:"");
+  const ttl=(o&&o.h&&o.h[0]&&o.h[0].t)?` <span class="otitle">「${esc(o.h[0].t.replace(/\s*\[[^\]]*\]\s*/g," ").trim())}」</span>`:"";
+  return `<div class="morig"><div class="ohead">원작 웹소설${ttl}${au}</div><div class="olinks">${links}${none}</div></div>`;
+}
+function detailHtml(det, name, id){
   const info=[];
   if(det.g) info.push(["장르", det.g + (det.dailyplus?" · 매일+":"")]);
   if(det.cp) info.push(["제작사", det.cp==="다중"?"여러 제작사":det.cp]);
@@ -907,6 +923,7 @@ function detailHtml(det, name){
   if(info.length) h+=`<div class="mrows">`+info.map(([k,v])=>`<div class="mrow"><span class="mk">${k}</span><span class="mv">${esc(v)}</span></div>`).join("")+`</div>`;
   const kws=(det.k||[]).slice(); if(det.novel) kws.push("소설원작");
   if(kws.length) h+=`<div class="mkw">`+kws.map(t=>`<button class="kw kwbtn" data-kw="${esc(t)}">#${esc(t)}</button>`).join("")+`</div>`;
+  if(id!=null) h+=origHtml(id, det);
   if(det.syn) h+=`<p class="msyn">${esc(det.syn)}</p>`;
   return h;
 }
@@ -974,14 +991,14 @@ function openModal(d){
   Promise.all([webtoon?ensureDetails():isSeries?ensureSeriesDetails():Promise.resolve(), ensureHistory(), isSeries?Promise.resolve():ensureAppWd(), isSeries?Promise.resolve():ensureAgenHist()]).then(()=>{
     if(modalSeq!==myTok) return;
     const el=document.getElementById("mdetail");
-    if(webtoon && el) el.innerHTML = (DETAILS[d.id]?detailHtml(DETAILS[d.id], d.name):'<div class="mloading">상세 정보 없음</div>');
+    if(webtoon && el) el.innerHTML = (DETAILS[d.id]?detailHtml(DETAILS[d.id], d.name, d.id):'<div class="mloading">상세 정보 없음</div>');
     else if(isSeries && el) el.innerHTML = (SERIESDET&&SERIESDET[d.id])?seriesDetailHtml(SERIESDET[d.id]):'<div class="mloading">상세 수집 중 — 매일 추가됩니다</div>';
     const cx=document.getElementById("mcross"); if(cx) cx.innerHTML=crossBasisHtml(d, caps.series);
   });
   // 웹툰: 연동된 시리즈 다운수는 SERIES(지연) 로드 후 상세에 주입 (초기 표시 안 막음)
   if(webtoon){ Promise.all([ensureDetails(), ensureSeries(), ensureSeriesDetails()]).then(()=>{
     if(modalSeq!==myTok) return; const el=document.getElementById("mdetail");
-    if(el && DETAILS[d.id]) el.innerHTML = detailHtml(DETAILS[d.id], d.name);
+    if(el && DETAILS[d.id]) el.innerHTML = detailHtml(DETAILS[d.id], d.name, d.id);
   }); }
   // 매출 누적 그래프 (웹툰=매칭 시리즈 / 시리즈=자기 자신)
   if(webtoon||isSeries){ Promise.all([ensureSeries(), ensureSeriesDetails(), ensureRevHist(), ensureEpHist(), webtoon?ensureDetails():Promise.resolve()]).then(()=>{
@@ -1036,7 +1053,7 @@ function openWorkModal(w){
   (isWt?Promise.all([ensureDetails(),ensureSeries(),ensureSeriesDetails()]):ensureSeriesDetails()).then(()=>{
     if(modalSeq!==myTok) return;
     const el=document.getElementById("mdetail"); if(!el) return;
-    if(isWt) el.innerHTML = DETAILS[w.id]?detailHtml(DETAILS[w.id], w.name):'<div class="mloading">상세 정보 없음</div>';
+    if(isWt) el.innerHTML = DETAILS[w.id]?detailHtml(DETAILS[w.id], w.name, w.id):'<div class="mloading">상세 정보 없음</div>';
     else el.innerHTML = (SERIESDET&&SERIESDET[w.id])?seriesDetailHtml(SERIESDET[w.id]):'<div class="mloading">상세 수집 중 — 매일 추가됩니다</div>';
   });
   Promise.all([ensureSeries(), ensureSeriesDetails(), ensureRevHist(), ensureEpHist(), isWt?ensureDetails():Promise.resolve()]).then(()=>{

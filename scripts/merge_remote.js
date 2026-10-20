@@ -79,6 +79,12 @@ function mergeHistory(mine, rem, rmax) {
   return n;
 }
 
+// origins: {works:{id:{at,...}}} — 작품마다 확인일(at)이 더 새로운 쪽, 내게 없는 작품은 추가
+function mergeOrigins(mine, rem) {
+  let n = 0; mine.works = mine.works || {};
+  for (const id in (rem.works || {})) { const r = rem.works[id], m = mine.works[id]; if (!m || newer(r.at, m.at)) { mine.works[id] = r; n++; } }
+  return n;
+}
 const FILES = [
   ["series_details.json", mergeSeriesDetails],
   ["series_extra.json", mergeSeriesExtra],
@@ -86,6 +92,7 @@ const FILES = [
   ["revenue_history.json", (m, r) => mergeHistory(m, r, 150)],
   ["ep_history.json", (m, r) => mergeHistory(m, r, 150)],
   ["fav_history.json", (m, r) => mergeHistory(m, r, 150)],
+  ["origins.json", mergeOrigins],
 ];
 const out = {};
 for (const [name, fn] of FILES) {
