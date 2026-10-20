@@ -2,13 +2,12 @@
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
 
 const WEEKDAYS = [["mon","월"],["tue","화"],["wed","수"],["thu","목"],["fri","금"],["sat","토"],["sun","일"],["dailyPlus","매일+"]];
-const GENRES = [["HISTORICAL","무협/사극"],["FANTASY","판타지"],["ACTION","액션"],["DRAMA","드라마"],["PURE","로맨스"],["SENSIBILITY","감성"],["DAILY","일상"],["COMIC","개그"],["THRILL","스릴러"],["SPORTS","스포츠"]];
 const PERIODS = [["DAILY","일간"],["WEEKLY","주간"],["MONTHLY","월간"]];
 const SERIES_CATNAMES = { comic:["전체장르","소년","순정","드라마","무협","BL"], novel:["전체장르","로맨스","판타지","미스터리","라이트노벨","무협","로판","현판","BL"] };
 const SERIES_PLATS = [["web","웹"],["mobile","모바일"]];
 
-let APP=null, WEEKDAY=null, GENRE=null, SERIES=null, PROMO=null, LOOKUP={id:{},name:{}}, WEEKS=[];
-let AGEN=null, AGEN_IDX=null, agenLoading=null;   // 앱 장르 주간랭킹(data/app_genre/) — 탭 열 때 불러옴
+let APP=null, WEEKDAY=null, SERIES=null, PROMO=null, LOOKUP={id:{},name:{}}, WEEKS=[];
+let AGEN=null, AGEN_IDX=null, agenLoading=null, AGENH=null, agenhLoading=null;   // 앱 장르 주간랭킹(data/app_genre/) — 탭 열 때 불러옴
 const AGEN_GENRES=["판타지·무협","액션","드라마","로맨스","스릴러","일상·개그"];
 let APPWD=null, APPWDH=null, appwdLoading=null;
 let NTOP=[];   // 신작 탭 주간 거래액 TOP 10(요약 칸 아래)
@@ -67,8 +66,6 @@ const SOURCES = {
   appgenre:{ label:"앱 장르 주간", variants:null, subs:()=>((AGEN_IDX&&AGEN_IDX.genres)||AGEN_GENRES).map(k=>[k,String((AGEN&&AGEN.charts&&AGEN.charts[k]||[]).length)]), data:(v,s)=>AGEN&&AGEN.charts&&AGEN.charts[s], caps:{move:1,streak:1,badge:1}, filters:F_APP, sorts:S_APP.filter(x=>x[0]!=="revenue"), note:()=>AGEN&&AGEN.date?`${weekLabel(AGEN.date)} · 앱 「${sub} 웹툰 주간랭킹」 · ${AGEN.src&&AGEN.src[sub]==="phone"?"앱 화면 100위(폰)":"검색 위젯 45위 · 순위변동은 폰 수집 때만"}`:"앱 장르 주간랭킹 · 아직 데이터 없음" },
   // 앱 = 폰으로 읽은 실제 앱 인기순(예전 '모바일'은 m.comic 모바일 웹이라 앱과 순서가 달라서 뺌)
   weekday: { label:"요일별", variants:[["app","앱"],["web","웹"]], subs:()=>variant==="app"?APPWD_SUBS:WEEKDAYS, data:(v,s)=>v==="app"?(APPWD&&APPWD.tabs&&APPWD.tabs[s+gsuf()]):(WEEKDAY&&WEEKDAY.web&&WEEKDAY.web[s]), caps:{badge:1,gsort:1}, filters:F_MIN, get sorts(){ return variant==="app"?GSORTS:[]; }, note:v=>v==="app"?(APPWD&&APPWD.date?`${dot((APPWD.tabDates&&APPWD.tabDates[sub+gsuf()])||APPWD.date)} · 앱 ${(GSORTS.find(x=>x[0]===sMode)||GSORTS[0])[1]}(폰 화면) · 매일`:"앱 인기순 · 아직 데이터 없음"):`${dot(WEEKDAY.date)} · 요일별 인기순 · 웹(PC) · 자동` },
-  // 웹(PC)만 — m.comic 모바일 장르는 2026-10-18부터 안 받음(앱 장르 순위는 '앱 장르 주간' 탭)
-  genre:   { label:"장르", variants:null, subs:()=>GENRES, data:(v,s)=>GENRE&&GENRE.web&&notDone(GENRE.web[s]), caps:{badge:1}, filters:F_MIN, sorts:[], note:()=>`${dot(GENRE.date)} · 장르별 인기순 · 웹(PC) · 자동 · 완결작은 완결 탭으로 옮김(순위 번호는 네이버 원래 순위)` },
   done:    { label:"완결", variants:null, subs:()=>doneSubs(), data:(v,s)=>doneWorkSet(s), caps:{revenue:1,badge:1,done:1}, filters:F_MIN, sorts:[["fav","관심수순"],["total","총거래액순"],["per","회차당순"]], note:()=>`완결된 웹툰 · 장르·신작·성인 목록에서 옮겨 왔어요` },
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][platform]&&SERIES[v][platform][scat]&&SERIES[v][platform][scat][s], caps:{move:1,tiles:1,series:1,badge:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · ${platform==="web"?"웹(PC)":"모바일"} · ${scat} · 자동` },
   promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_MIN, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
@@ -273,11 +270,10 @@ async function boot(){
   let idx;
   try{ idx=await fetchJSON("data/index.json"); }catch(e){ fail(); return; }
   WEEKS=idx.weeks.slice();
-  const R=await Promise.allSettled([ fetchJSON(`data/${idx.latest}.json`), fetchJSON("data/weekday.json"), fetchJSON("data/genre.json"), fetchJSON("data/lookup.json") ]);
+  const R=await Promise.allSettled([ fetchJSON(`data/${idx.latest}.json`), fetchJSON("data/weekday.json"), fetchJSON("data/lookup.json") ]);
   APP=R[0].status==="fulfilled"?R[0].value:{date:idx.latest,charts:{전체:[],여성:[],남성:[]}};
   WEEKDAY=R[1].status==="fulfilled"?R[1].value:{date:"",web:{},app:{}};
-  GENRE=R[2].status==="fulfilled"?R[2].value:{date:"",web:{},app:{}};
-  LOOKUP=R[3].status==="fulfilled"?R[3].value:{id:{},name:{}};
+  LOOKUP=R[2].status==="fulfilled"?R[2].value:{id:{},name:{}};
   try{ for(const v of ["web","app"]) (WEEKDAY[v]&&WEEKDAY[v].dailyPlus||[]).forEach(r=>DAILYPLUS.add(r.id)); }catch(e){}
 
   const wsel=document.getElementById("wsel"), wl=weekLabels(WEEKS);
@@ -312,6 +308,17 @@ function ensureAgen(){
     sel.onchange=async()=>{ try{ AGEN=await fetchJSON(`data/app_genre/${sel.value}.json`); if(src==="appgenre"){ renderSubnav(); renderView(); } }catch(e){} };
   }).catch(()=>{ AGEN={date:"",src:{},charts:{}}; AGEN_IDX={weeks:[],genres:AGEN_GENRES}; });
   return agenLoading;
+}
+/* 앱 장르 주간 전 주차 → AGENH = {weeks:[...], series:{장르:{id:[주차별 순위]}}} (상세 스파크라인·추이 엑셀) */
+function ensureAgenHist(){
+  if(AGENH) return Promise.resolve();
+  if(!agenhLoading) agenhLoading=ensureAgen().then(async()=>{
+    const weeks=((AGEN_IDX&&AGEN_IDX.weeks)||[]).slice().sort(), series={};
+    const files=await Promise.all(weeks.map(w=>fetchJSON(`data/app_genre/${w}.json`).catch(()=>null)));
+    files.forEach((f,i)=>{ if(!f||!f.charts) return; for(const g in f.charts){ const S=series[g]||(series[g]={}); for(const row of f.charts[g]){ const id=row.id!=null?row.id:LOOKUP.name[row.t]; if(id==null) continue; (S[id]||(S[id]=Array(weeks.length).fill(null)))[i]=row.r; } } });
+    AGENH={weeks, series};
+  }).catch(()=>{ AGENH={weeks:[],series:{}}; });
+  return agenhLoading;
 }
 function ensurePromo(){ if(PROMO) return Promise.resolve(); if(!promoLoading) promoLoading=fetchJSON("data/promo.json").then(d=>{PROMO=d;}).catch(()=>{PROMO={date:"",comic:{},novel:{}};}); return promoLoading; }
 function ensureSeriesDetails(){ if(SERIESDET&&SERIESEXTRA) return Promise.resolve(); if(!seriesDetLoading) seriesDetLoading=Promise.all([
@@ -610,7 +617,6 @@ function selectSrc(k){
   if(k==="weekday" && !APPWD){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureAppWd().then(()=>{ if(src==="weekday"){ renderSubnav(); renderView(); } }); return; }
   if(k==="appgenre" && !AGEN){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureAgen().then(()=>{ if(src!=="appgenre") return; document.getElementById("gwsel").style.display=(AGEN_IDX&&AGEN_IDX.weeks.length>1)?"":"none"; renderSubnav(); renderView(); }); return; }
   if(k==="promo" && !PROMO){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensurePromo().then(()=>renderView()); return; }
-  if(k==="genre" && !DETAILS){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureDetails().then(()=>{ if(src==="genre") renderView(); }); return; }
   if((k==="revenue"||k==="newworks"||k==="revchange"||k==="done") && (!SERIES||!SERIESDET||!DETAILS||((k==="revchange"||k==="newworks")&&!REVHIST))){ document.getElementById("board").innerHTML=`<li class="empty">${k==="newworks"?"신작":k==="revchange"?"매출 변동":k==="done"?"완결":"매출"} 데이터 불러오는 중…</li>`; Promise.all([ensureSeries(),ensureSeriesDetails(),ensureDetails(),ensureRevHist()]).then(()=>{ SNAMEIDX=null; renderView(); }); return; }
   if(k==="series") setupSeriesCtl();
   renderView();
@@ -925,14 +931,13 @@ function crossBasisHtml(d, isSeries){
     for(const [p,pl] of PERIODS){ const r=findRank(base&&base[p],true); if(r) E.push([`${variant==="comic"?"웹툰":"웹소설"} ${platform==="web"?"웹":"모바일"} ${pl}`, `series_${variant}_${platform}_${p}`, r]); }
   } else {
     for(const c of ["전체","여성","남성"]){ const r=findRank(APP&&APP.charts[c],false); if(r) E.push([`앱주간 ${c}`, `app_${c}`, r]); }
-    if(AGEN&&AGEN.charts) for(const g in AGEN.charts){ const r=findRank(AGEN.charts[g],false); if(r) E.push([`앱 장르 주간 ${g}`, `agen_${g}`, r]); }   // 앱 장르 탭을 한 번 연 뒤부터
+    if(AGEN&&AGEN.charts) for(const g in AGEN.charts){ const r=findRank(AGEN.charts[g],false)||findRank(AGEN.charts[g],true); if(r) E.push([`앱 장르 주간 ${g}`, `agen_${g}`, r]); }   // 상세 열 때 불러옴(ensureAgenHist)
     if(APPWD&&APPWD.tabs) for(const [w,wl] of APPWD_SUBS){ const r=findRank(APPWD.tabs[w],true); if(r) E.push([`요일 앱 ${wl}`, `awd_${w}`, r]); }
     for(const [w,wl] of WEEKDAYS){ const r=findRank(WEEKDAY.web&&WEEKDAY.web[w],true); if(r) E.push([`요일 웹 ${wl}`, `wd_web_${w}`, r]); }
-    for(const [g,gl] of GENRES){ const r=findRank(GENRE.web&&GENRE.web[g],true); if(r) E.push([`장르 웹 ${gl}`, `gn_web_${g}`, r]); }
   }
   if(!E.length) return "";
   const rows=E.map(([label,key,rank])=>{
-    const hist=key.startsWith("awd_") ? (APPWDH&&APPWDH.series[key.slice(4)]&&APPWDH.series[key.slice(4)][d.id]) : (HISTORY&&HISTORY.series[key]&&HISTORY.series[key][d.id]);
+    const hist=key.startsWith("awd_") ? (APPWDH&&APPWDH.series[key.slice(4)]&&APPWDH.series[key.slice(4)][d.id]) : key.startsWith("agen_") ? (AGENH&&AGENH.series[key.slice(5)]&&AGENH.series[key.slice(5)][d.id]) : (HISTORY&&HISTORY.series[key]&&HISTORY.series[key][d.id]);
     const spark=hist?sparkSvg(hist):"";
     return `<div class="xrow"><span class="xlab">${esc(label)}</span>${spark}<span class="xrk">${rank}위</span></div>`;
   }).join("");
@@ -966,7 +971,7 @@ function openModal(d){
     <a class="mlink" href="${url}" target="_blank" rel="noopener noreferrer">네이버에서 작품 보기 →</a>`;
   document.getElementById("modal").hidden=false;
   const myTok=++modalSeq;
-  Promise.all([webtoon?ensureDetails():isSeries?ensureSeriesDetails():Promise.resolve(), ensureHistory(), isSeries?Promise.resolve():ensureAppWd()]).then(()=>{
+  Promise.all([webtoon?ensureDetails():isSeries?ensureSeriesDetails():Promise.resolve(), ensureHistory(), isSeries?Promise.resolve():ensureAppWd(), isSeries?Promise.resolve():ensureAgenHist()]).then(()=>{
     if(modalSeq!==myTok) return;
     const el=document.getElementById("mdetail");
     if(webtoon && el) el.innerHTML = (DETAILS[d.id]?detailHtml(DETAILS[d.id], d.name):'<div class="mloading">상세 정보 없음</div>');
@@ -1087,7 +1092,6 @@ function wireModal(){
 function currentBasisKey(){
   if(src==="app") return "app_"+sub;
   if(src==="weekday") return variant==="app" ? "awd_"+sub : "wd_web_"+sub;
-  if(src==="genre") return "gn_"+variant+"_"+sub;
   if(src==="series") return "series_"+variant+"_"+platform+"_"+sub;
 }
 /* 날짜별 순위 추이 데이터: {dates:[], rankFn:(row)=>[각 날짜 순위]} */
@@ -1110,7 +1114,7 @@ async function trendData(){
 }
 /* 엑셀(CSV) 다운로드 — 현재 화면 + 기준별 순위 + 집계 + 날짜별 순위추이 */
 async function exportCSV(){
-  await ensureDetails();
+  await ensureDetails(); await ensureAgen();
   const findRank=(rows,byId,d)=>{ if(!rows)return null; const row=byId?rows.find(r=>r.id===d.id):rows.find(r=>r.t===d.name); return row?row.r:null; };
   const cross=d=>{
     const E=[];
@@ -1119,7 +1123,7 @@ async function exportCSV(){
       for(const c of ["전체","여성","남성"]){ const r=findRank(APP&&APP.charts[c],false,d); if(r)E.push("앱"+c+r); }
       if(APPWD&&APPWD.tabs) for(const [w,wl] of APPWD_SUBS){ const r=findRank(APPWD.tabs[w],true,d); if(r)E.push("요일앱"+wl+r); }
       for(const [w,wl] of WEEKDAYS){ const r=findRank(WEEKDAY.web&&WEEKDAY.web[w],true,d); if(r)E.push("요일웹"+wl+r); }
-      for(const [g,gl] of GENRES){ const r=findRank(GENRE.web&&GENRE.web[g],true,d); if(r)E.push("장르웹"+gl+r); }
+      if(AGEN&&AGEN.charts) for(const g in AGEN.charts){ const r=findRank(AGEN.charts[g],false,d)||findRank(AGEN.charts[g],true,d); if(r)E.push("앱장르"+g+r); }
     }
     return E.join(" · ");
   };
@@ -1150,14 +1154,12 @@ async function exportEpisodeCSV(id, name){
   document.body.appendChild(a); a.click(); a.remove();
 }
 /* basisKey → 사람이 읽는 라벨 */
-const WDMAP=Object.fromEntries(WEEKDAYS), GNMAP=Object.fromEntries(GENRES), PMAP=Object.fromEntries(PERIODS);
+const WDMAP=Object.fromEntries(WEEKDAYS), PMAP=Object.fromEntries(PERIODS);
 function basisLabel(key){
   if(key.startsWith("app_")) return "앱주간 "+key.slice(4);
   if(key.startsWith("wd_web_")) return "요일 웹 "+(WDMAP[key.slice(7)]||key.slice(7));
   if(key.startsWith("wd_app_")) return "요일 모바일웹 "+(WDMAP[key.slice(7)]||key.slice(7));   // 예전 m.comic 기록(엑셀에만)
-  if(key.startsWith("awd_")){ const t=key.slice(4), s=APPWD_SUBS.find(x=>x[0]===t); return "요일 앱 "+(s?s[1]:t); }
-  if(key.startsWith("gn_web_")) return "장르 웹 "+(GNMAP[key.slice(7)]||key.slice(7));
-  if(key.startsWith("gn_app_")) return "장르 모바일 "+(GNMAP[key.slice(7)]||key.slice(7));
+  if(key.startsWith("awd_")){ const m=key.slice(4).match(/^(.*?)(?:_(f|m))?$/), t=m[1], sx=m[2]==="f"?" 여성":m[2]==="m"?" 남성":"", s=APPWD_SUBS.find(x=>x[0]===t); return "요일 앱 "+(s?s[1]:t)+sx; }
   if(key.startsWith("series_comic_")||key.startsWith("series_novel_")){ const svc=key.startsWith("series_comic_")?"웹툰":"웹소설"; const parts=key.slice(13).split("_"); const p=parts.pop(); const pf=parts.join("_"); return "시리즈 "+svc+(pf?" "+(pf==="web"?"웹":pf==="mobile"?"모바일":pf):"")+" "+(PMAP[p]||p); }
   return key;
 }
@@ -1167,6 +1169,7 @@ async function exportTrendXLSX(id, name){
   await ensureHistory();
   const dates=(HISTORY&&HISTORY.dates)||[], sheets=[];
   for(const [key,S] of Object.entries((HISTORY&&HISTORY.series)||{})){
+    if(key.startsWith("gn_")) continue;   // 웹·모바일 장르 순위는 2026-10-20부터 안 씀(앱 장르 주간으로 대체)
     if(S[id]) sheets.push({ name:basisLabel(key), rows:[["날짜","순위"], ...dates.map((d,i)=>[d, S[id][i]==null?"":S[id][i]])] });
   }
   if(!SOURCES[src].caps.series){
@@ -1179,8 +1182,10 @@ async function exportTrendXLSX(id, name){
       const rows=WEEKS.map(w=>{ const r=((wc[w]&&wc[w][c])||[]).find(x=>x.t===name); return [w, r?r.r:""]; });
       if(rows.some(r=>r[1]!=="")) sheets.push({ name:"앱주간 "+c, rows:[["주차","순위"], ...rows] });
     }
+    await ensureAgenHist();   // 앱 장르 주간(주차별)
+    for(const [g,S] of Object.entries((AGENH&&AGENH.series)||{})) if(S[id]) sheets.push({ name:"앱 장르 주간 "+g, rows:[["주차","순위"], ...AGENH.weeks.map((w,i)=>[w, S[id][i]==null?"":S[id][i]])] });
   }
-  if(!sheets.length){ alert("아직 이 작품의 순위 추이 데이터가 없어요.\n(요일별·장르·시리즈는 매일, 앱주간은 매주 쌓입니다)"); return; }
+  if(!sheets.length){ alert("아직 이 작품의 순위 추이 데이터가 없어요.\n(요일별·시리즈는 매일, 앱주간·앱 장르 주간은 매주 쌓입니다)"); return; }
   MiniXlsx.downloadMulti(sheets, name+"_순위추이");
 }
 function wireTheme(){

@@ -456,10 +456,9 @@ async function collectEpisodes(details, updated){
 }
 
 /* 순위 추이 누적: history.json = {dates:[...], series:{basisKey:{id:[rank aligned to dates]}}} (최근 45일) */
-function buildTodayBases(web_wd, app_wd, web_gn, app_gn, s_comic, s_novel){
+function buildTodayBases(web_wd, app_wd, s_comic, s_novel){
   const b = {}, put = (key, arr) => { b[key] = Object.fromEntries((arr||[]).map(r => [r.id, r.r])); };
   for(const w of WEEKDAYS){ put("wd_web_"+w, web_wd[w]); put("wd_app_"+w, app_wd[w]); }   // app_wd는 이제 비어 있음 → 옛 모바일웹 기록은 빈 칸으로 날짜만 맞춰 가다 45일 뒤 사라짐
-  for(const g of GENRES){ put("gn_web_"+g, web_gn[g]); put("gn_app_"+g, app_gn[g]); }   // app_gn 비어 있음 → 옛 기록은 빈 칸으로 날짜만 맞춤
   for(const p of PERIODS){
     put("series_comic_web_"+p, s_comic.web["전체장르"]&&s_comic.web["전체장르"][p]);
     put("series_comic_mobile_"+p, s_comic.mobile["전체장르"]&&s_comic.mobile["전체장르"][p]);
@@ -684,12 +683,12 @@ if (require.main === module) (async ()=>{
   console.log("collecting", date, "…");
   // 웹 먼저(lookup 채움) → 앱은 lookup 참조
   const web_wd = await webWeekday();
-  const web_gn = await webGenre();
+  // 장르 순위는 2026-10-20부터 저장 안 함(사이트는 앱 장르 주간으로 대체). 목록 요청은 남김 — 요일 목록에 없는 작품(완결 직후·시즌 휴재 ~30개)의 이름·썸네일·별점이 lookup·details에서 빠지지 않게
+  await webGenre();
   // 요일별 m.comic(모바일 웹) 순위는 2026-10-18부터 안 받음 — 실제 앱 순위와 달라서, 사이트 요일별 › 앱은 폰 수집(collect_app_weekday.js)
   const app_wd = {};
-  const app_gn = {};   // 장르 m.comic(모바일 웹)도 2026-10-18부터 안 받음 — 사이트 장르 탭은 웹만, 앱 장르 순위는 app_genre(폰·위젯)
   const [s_comic, s_novel] = await Promise.all([seriesAll("comic"), seriesAll("novel")]);
-  await fillMissingTitles([...Object.values(app_wd), ...Object.values(app_gn)]);   // 앱 랭킹에만 있는 작품 이름·썸네일
+  await fillMissingTitles([...Object.values(app_wd)]);   // 앱 랭킹에만 있는 작품 이름·썸네일
 
   let existingDetails = {};
   try { existingDetails = JSON.parse(fs.readFileSync(path.join(OUT,"details.json"),"utf8")); } catch(e){}
@@ -699,10 +698,10 @@ if (require.main === module) (async ()=>{
 
   let hist = {};
   try { hist = JSON.parse(fs.readFileSync(path.join(OUT,"history.json"),"utf8")); } catch(e){}
-  hist = updateHistory(hist, date, buildTodayBases(web_wd, app_wd, web_gn, app_gn, s_comic, s_novel));
+  for(const bk in (hist.series||{})) if(bk.startsWith("gn_")) delete hist.series[bk];   // 옛 장르 순위 기록 정리
+  hist = updateHistory(hist, date, buildTodayBases(web_wd, app_wd, s_comic, s_novel));
 
   fs.writeFileSync(path.join(OUT,"weekday.json"), JSON.stringify({ updated, date, web:web_wd, app:app_wd }));
-  fs.writeFileSync(path.join(OUT,"genre.json"), JSON.stringify({ updated, date, web:web_gn, app:app_gn }));
   fs.writeFileSync(path.join(OUT,"series.json"), JSON.stringify({ updated, date, comic:s_comic, novel:s_novel }));
   try { const promo = await collectPromo(); fs.writeFileSync(path.join(OUT,"promo.json"), JSON.stringify({ updated, date, comic:promo.comic, novel:promo.novel })); } catch(e){ console.error("promo failed:", e.message); }
   // 앱 장르 주간랭킹 1~45위(검색 위젯) — 같은 주에 폰 수집(100위+순위변동)이 있으면 그걸 유지. scripts/lib/app_genre.cjs
