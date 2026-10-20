@@ -254,7 +254,7 @@ function cohortHtml(d){
   return `<div class="rev" title="${esc(lab)}"><span class="rev-full">${big}</span><span class="rev-per">${esc(small)}</span></div>`;
 }
 function ensureLW(){ if(LW) return Promise.resolve(); if(!lwLoading) lwLoading=fetchJSON("data/launch_weeks.json").then(d=>{LW=d;}).catch(()=>{LW={works:{}};}); return lwLoading; }
-const GROUPS=[["naver","네이버웹툰",["app","appgenre","weekday","genre","revenue","newworks","cohort","revchange","done"]],["series","시리즈",["series","promo"]]];
+const GROUPS=[["naver","네이버웹툰",["app","appgenre","weekday","revenue","newworks","cohort","revchange","done"]],["series","시리즈",["series","promo"]]];
 let group="naver";
 const subLabel = s => (src==="app"||src==="appgenre") ? s : (SOURCES[src].subs().find(x=>x[0]===s)||[s,s])[1];
 const varLabel = () => { const vs=SOURCES[src].variants; return vs?(vs.find(x=>x[0]===variant)||["",""])[1]:""; };
