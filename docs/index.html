@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=46">
+<link rel="stylesheet" href="style.css?v=48">
 </head>
 <body>
 <div class="wrap">
@@ -77,6 +77,10 @@
     <div class="panel" aria-label="이 탭 주간 거래액 상위">
       <div class="lab">주간 거래액 TOP 5 · 선호 성별</div>
       <div class="gap" id="wmoney"></div>
+      <div class="lab glab2">전주 대비 거래액 상승 TOP 3</div>
+      <div class="gap" id="wmoneyup"></div>
+      <div class="lab glab2" id="woriglab">원작 웹툰 비율</div>
+      <div class="ostat" id="worig"></div>
     </div>
     <div class="panel pwide" aria-label="신작 18주 추적">
       <div class="lab" id="wtracklab">신작 18주 추적</div>
@@ -94,6 +98,10 @@
     <div class="panel" aria-label="이 장르 주간 거래액 상위">
       <div class="lab">주간 거래액 TOP 5 · 선호 성별</div>
       <div class="gap" id="gmoney"></div>
+      <div class="lab glab2">전주 대비 거래액 상승 TOP 3</div>
+      <div class="gap" id="gmoneyup"></div>
+      <div class="lab glab2" id="goriglab">원작 웹툰 비율</div>
+      <div class="ostat" id="gorig"></div>
     </div>
   </section>
 
@@ -125,6 +133,6 @@
 
 <script src="xlsx.js?v=1"></script>
 <script src="cmt.js?v=5"></script>
-<script src="app.js?v=81"></script>
+<script src="app.js?v=83"></script>
 </body>
 </html>
