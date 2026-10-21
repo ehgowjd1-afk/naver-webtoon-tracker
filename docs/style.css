@@ -448,11 +448,15 @@ footer a:hover{text-decoration:underline}
 /* 요일별 › 앱 요약: 신작 18주 추적 */
 .panel.pwide{grid-column:1/-1}
 .track{display:flex; flex-direction:column; gap:6px}
-.track .trow{display:grid; grid-template-columns:28px minmax(0,1fr) 64px 64px 66px 48px; align-items:center; gap:8px; font-size:13px}
+.track .trow{display:grid; grid-template-columns:28px minmax(0,1fr) 64px 190px 48px; align-items:center; gap:8px; font-size:13px}
 .track .trk{font-weight:700; font-variant-numeric:tabular-nums; color:var(--muted); text-align:right}
 .track .tname{min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; font-weight:500}
 .track .twk,.track .tfrom{font-size:11.5px; color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap}
 .track .tsp{display:inline-block; width:64px}
 .track .tchg{font-size:11.5px; font-weight:700; color:var(--muted); text-align:right; font-variant-numeric:tabular-nums}
 .track .tchg.up{color:var(--up)} .track .tchg.down{color:var(--down)}
-@media(max-width:560px){ .track .trow{grid-template-columns:24px minmax(0,1fr) 64px 44px} .track .twk,.track .tfrom{display:none} }
+@media(max-width:560px){ .track .trow{grid-template-columns:22px minmax(0,1fr) 190px 40px} .track .twk{display:none} }
+.track .tch{display:block; overflow:visible}
+.track .tch .tcl{font-size:9.5px; fill:var(--muted); font-variant-numeric:tabular-nums}
+.track .tch .tcl-now{fill:var(--ink); font-weight:700}
+.track .tch .tcd{font-size:8.5px; fill:var(--faint)}
