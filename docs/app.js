@@ -18,6 +18,32 @@ const CO_SORTS=[["c2","2주 누적 거래액"],["w1","첫 주 거래액"],["c4",
 const APPWD_SUBS=[["all","전체"], ["new","신작"], ...WEEKDAYS];
 const GSORTS=[["pop","인기순"],["f","여성 인기순"],["m","남성 인기순"]];   // 요일별 › 앱 정렬 칩 → 데이터 키 접미사(mon · mon_f · mon_m)
 const gsuf = () => sMode==="f"?"_f":sMode==="m"?"_m":"";
+const F_AWD=[["all","전체"],["up","상승"],["down","하락"],["new","신작·진입"],["orig","원작"]];
+/* 요일별 › 앱 날짜 선택: AWD_DATE=""면 최신. 지난 날짜는 날짜별 순위 기록(app_weekday_history)에서 다시 만듦.
+   m = 그 탭의 바로 전 수집일 순위 − 그날 순위(▲ 올라감), 전날 없던 작품은 '진입' */
+let AWD_DATE="";
+const awdDate = key => AWD_DATE || (APPWD&&APPWD.tabDates&&APPWD.tabDates[key]) || (APPWD&&APPWD.date) || "";
+function appwdRows(key){
+  if(!APPWD) return [];
+  const H=APPWDH||{dates:[],series:{}}, S=H.series[key]||{}, D=awdDate(key), latest=(APPWD.tabDates&&APPWD.tabDates[key])||APPWD.date;
+  const di=H.dates.indexOf(D), has=i=>{ for(const id in S) if(S[id][i]!=null) return true; return false; };
+  let pi=di-1; while(pi>=0 && !has(pi)) pi--;   // 이 탭의 바로 전 수집일(정렬별로 시작일이 달라서)
+  const names={}; for(const k in APPWD.tabs) for(const x of APPWD.tabs[k]) if(x.id!=null && !names[x.id]) names[x.id]=x;   // 지난 날짜 행의 제목·썸네일 보충
+  let rows;
+  if(D===latest && APPWD.tabs[key]) rows=APPWD.tabs[key].map(x=>({...x, b:[...(x.b||[])]}));
+  else { if(di<0) return []; rows=[]; for(const id in S){ const r=S[id][di]; if(r==null) continue; const n=(H.names&&H.names[id])||names[id]; rows.push({r, id:+id, t:n?(n.t||n[0]):undefined, a:n?(n.a||n[1]||""):undefined, th:n?(n.th||n[2]||""):undefined, b:[]}); } rows.sort((a,b)=>a.r-b.r); }
+  if(pi>=0) for(const x of rows){ const p=(x.id!=null&&S[x.id])?S[x.id][pi]:null; x.m=p!=null?p-x.r:0; if(p==null && x.id!=null && !x.b.includes("진입")) x.b.push("진입"); }
+  return rows;
+}
+function renderAwDate(){   // 날짜 칸(달력) — 요일별 › 앱에서만
+  const el=document.getElementById("awdate"), now=document.getElementById("awdate-now"); if(!el) return;
+  const on = src==="weekday" && variant==="app" && APPWDH && APPWDH.dates.length;
+  el.hidden=!on; now.hidden=!on||!AWD_DATE;
+  if(!on) return;
+  const ds=APPWDH.dates; el.min=ds[0]; el.max=ds[ds.length-1]; el.value=awdDate(sub+gsuf());
+  el.onchange=()=>{ const v=el.value; AWD_DATE=(!v||v===((APPWD.tabDates&&APPWD.tabDates[sub+gsuf()])||APPWD.date))?"":v; renderView(); };
+  now.onclick=()=>{ AWD_DATE=""; renderView(); };
+}
 let src="app", variant=null, sub="전체", platform="web", scat="전체장르", fMode="all", sMode="rank", query="", revWeek="";
 let rowsCache=[];
 let DETAILS=null, detailsLoading=null, HISTORY=null, historyLoading=null, KWINDEX=null, seriesLoading=null, promoLoading=null;
@@ -67,7 +93,7 @@ const SOURCES = {
   app:     { label:"앱 주간", variants:null, subs:()=>["전체","여성","남성"].map(k=>[k,String((APP&&APP.charts&&APP.charts[k]||[]).length)]), data:(v,s)=>APP&&APP.charts[s], caps:{move:1,streak:1,badge:1,tiles:1,gap:1}, filters:F_APP, sorts:S_APP, note:()=>`${weekLabel(APP.date)} · 앱 「이번 주 웹툰 랭킹」` },
   appgenre:{ label:"앱 장르 주간", variants:null, subs:()=>((AGEN_IDX&&AGEN_IDX.genres)||AGEN_GENRES).map(k=>[k,String((AGEN&&AGEN.charts&&AGEN.charts[k]||[]).length)]), data:(v,s)=>AGEN&&AGEN.charts&&AGEN.charts[s], caps:{move:1,streak:1,badge:1}, filters:F_APP, sorts:S_APP.filter(x=>x[0]!=="revenue"), note:()=>AGEN&&AGEN.date?`${weekLabel(AGEN.date)} · 앱 「${sub} 웹툰 주간랭킹」 · ${AGEN.src&&AGEN.src[sub]==="phone"?"앱 화면 100위(폰)":"검색 위젯 45위 · 순위변동은 폰 수집 때만"}`:"앱 장르 주간랭킹 · 아직 데이터 없음" },
   // 앱 = 폰으로 읽은 실제 앱 인기순(예전 '모바일'은 m.comic 모바일 웹이라 앱과 순서가 달라서 뺌)
-  weekday: { label:"요일별", variants:[["app","앱"],["web","웹"]], subs:()=>variant==="app"?APPWD_SUBS:WEEKDAYS, data:(v,s)=>v==="app"?(APPWD&&APPWD.tabs&&APPWD.tabs[s+gsuf()]):(WEEKDAY&&WEEKDAY.web&&WEEKDAY.web[s]), caps:{badge:1,gsort:1}, filters:F_MIN, get sorts(){ return variant==="app"?GSORTS:[]; }, note:v=>v==="app"?(APPWD&&APPWD.date?`${dot((APPWD.tabDates&&APPWD.tabDates[sub+gsuf()])||APPWD.date)} · 앱 ${(GSORTS.find(x=>x[0]===sMode)||GSORTS[0])[1]}(폰 화면) · 매일`:"앱 인기순 · 아직 데이터 없음"):`${dot(WEEKDAY.date)} · 요일별 인기순 · 웹(PC) · 자동` },
+  weekday: { label:"요일별", variants:[["app","앱"],["web","웹"]], subs:()=>variant==="app"?APPWD_SUBS:WEEKDAYS, data:(v,s)=>v==="app"?appwdRows(s+gsuf()):(WEEKDAY&&WEEKDAY.web&&WEEKDAY.web[s]), get caps(){ return variant==="app"?{badge:1,gsort:1,move:1}:{badge:1,gsort:1}; }, get filters(){ return variant==="app"?F_AWD:F_MIN; }, get sorts(){ return variant==="app"?GSORTS:[]; }, note:v=>v==="app"?(APPWD&&APPWD.date?`${dot(awdDate(sub+gsuf()))}${AWD_DATE?" (지난 날짜)":""} · 앱 ${(GSORTS.find(x=>x[0]===sMode)||GSORTS[0])[1]}(폰 화면) · ▲▼ = 전날 수집 대비 · 매일`:"앱 인기순 · 아직 데이터 없음"):`${dot(WEEKDAY.date)} · 요일별 인기순 · 웹(PC) · 자동` },
   done:    { label:"완결", variants:null, subs:()=>doneSubs(), data:(v,s)=>doneWorkSet(s), caps:{revenue:1,badge:1,done:1}, filters:F_MIN, sorts:[["fav","관심수순"],["total","총거래액순"],["per","회차당순"]], note:()=>`완결된 웹툰 · 장르·신작·성인 목록에서 옮겨 왔어요` },
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][platform]&&SERIES[v][platform][scat]&&SERIES[v][platform][scat][s], caps:{move:1,tiles:1,series:1,badge:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>`${dot(SERIES.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · ${platform==="web"?"웹(PC)":"모바일"} · ${scat} · 자동` },
   promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_ONE, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
@@ -648,6 +674,7 @@ function viewRows(){ return (SOURCES[src].data(variant,sub)||[]).map(enrichRow);
 function renderView(){
   const S=SOURCES[src], caps=S.caps;
   renderRevWsel();   // 매출변동 주 선택 드롭다운(요일 서브에서만) — revWeek 확정 후 meta/list
+  renderAwDate();    // 요일별 › 앱 날짜(달력)
   document.getElementById("meta").innerHTML=`${esc(S.note(variant))} · <b>${esc(subLabel(sub))}</b>`;
   document.getElementById("tiles").hidden=!(caps.tiles||caps.newtiles);
   document.getElementById("panels").hidden=!caps.tiles;
@@ -851,7 +878,7 @@ function renderList(){
     ? `<b>주단위 거래액</b> ${esc(revWeekLabel())} · 이번주−지난주 누적 거래액 · 전주 대비(<span style="color:var(--up)">▲</span>/<span style="color:var(--down)">▼</span>)은 완전한 2주부터`
     : `단가=(대여×0.9+소장×0.1)×100 · 총거래액=다운수×단가 · 회차당=총거래액×0.9×0.6÷시리즈 회차수 · 주단위거래액=이번주−지난주 누적`;
   countEl.innerHTML=`${rows.length}개 작품`+(fMode!=="all"||query?` (${subLabel(sub)} ${total}개 중)`:"")+((sMode==="revenue"||caps.revenue||caps.revchange)?` · <span style="color:var(--faint)">${revNote}</span>`:"");
-  if(!rows.length){ board.innerHTML=`<li class="empty">${(caps.gsort&&variant==="app"&&!(SOURCES[src].data(variant,sub)||[]).length)?"이 정렬은 아직 수집 전이에요 — 매일 아침 폰 수집 때 함께 쌓여요.":caps.revchange?"아직 완전한 한 주가 안 끝났어요. 연재요일별로 순차 표시돼요(수 9/16, 목 9/17 …). 수집 다운수가 전날 누적이라 주 마감 다음날부터 잡힙니다.":"조건에 맞는 작품이 없어요."}</li>`; return; }
+  if(!rows.length){ board.innerHTML=`<li class="empty">${(caps.gsort&&variant==="app"&&AWD_DATE&&!(SOURCES[src].data(variant,sub)||[]).length)?"이 날짜는 이 탭·정렬의 수집 기록이 없어요 — 달력에서 다른 날을 골라 주세요.":(caps.gsort&&variant==="app"&&!(SOURCES[src].data(variant,sub)||[]).length)?"이 정렬은 아직 수집 전이에요 — 매일 아침 폰 수집 때 함께 쌓여요.":caps.revchange?"아직 완전한 한 주가 안 끝났어요. 연재요일별로 순차 표시돼요(수 9/16, 목 9/17 …). 수집 다운수가 전날 누적이라 주 마감 다음날부터 잡힙니다.":"조건에 맞는 작품이 없어요."}</li>`; return; }
   const showRev = caps.revenue || sMode==="revenue";
   board.innerHTML=rows.map((d,i)=>{
     const rk = (caps.revenue||caps.revchange||caps.cohort) ? (d._rk||i+1) : d.r;

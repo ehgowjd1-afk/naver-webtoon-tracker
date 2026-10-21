@@ -4,7 +4,7 @@
  * 목록은 '따끈따끈! 업데이트 매일+' 같은 구역 제목이 나오는 곳에서 끝남(그 아래 칸은 다른 구역).
  * m.comic(모바일 웹) 인기순과 실제 앱 순서는 다름(2026-10-18 목요일 같은 자리 8/110) → 사이트 '요일별 › 앱'은 이 데이터.
  * 저장: docs/data/app_weekday.json = {date, updated, tabDates:{탭:날짜}, tabs:{all|all_f|all_m(전체 탭 여성·남성 인기순)|new|dailyPlus|mon..sun:[{r,t,a,id,th?,b[]}]}}
- *       docs/data/app_weekday_history.json = {dates:[], series:{탭:{titleId:[순위…]}}} (최근 60일)
+ *       docs/data/app_weekday_history.json = {dates:[], series:{탭:{titleId:[순위…]}}, names:{titleId:[제목,작가,썸네일]}} (최근 60일) — 사이트 달력으로 그날 순위·전날 대비 ▲▼
  *   node scripts/collect_app_weekday.js [--push] [--tabs=all,mon] [--dry] [--force]
  */
 const fs = require("fs");
@@ -102,6 +102,7 @@ function updateHistory(tabs) {
     const S = h.series[tab] || (h.series[tab] = {});
     for (const id in S) S[id][di] = null;   // 오늘 다시 받은 탭은 오늘 칸을 새로 씀
     for (const x of list) { if (!x.id) continue; const a = S[x.id] || (S[x.id] = Array(h.dates.length).fill(null)); a[di] = x.r; }
+    h.names = h.names || {}; for (const x of list) if (x.id) h.names[x.id] = [x.t, x.a || "", x.th || ""];   // 지난 날짜 순위를 사이트에서 다시 그릴 때 제목·작가·썸네일
   }
   const keep = 60; if (h.dates.length > keep) { const cut = h.dates.length - keep; h.dates = h.dates.slice(cut); for (const k in h.series) for (const id in h.series[k]) { h.series[k][id] = h.series[k][id].slice(cut); if (h.series[k][id].every((v) => v == null)) delete h.series[k][id]; } }
   fs.writeFileSync(fp, JSON.stringify(h));
