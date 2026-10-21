@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=48">
+<link rel="stylesheet" href="style.css?v=49">
 </head>
 <body>
 <div class="wrap">
@@ -82,10 +82,10 @@
       <div class="lab glab2" id="woriglab">원작 웹툰 비율</div>
       <div class="ostat" id="worig"></div>
     </div>
-    <div class="panel pwide" aria-label="신작 18주 추적">
-      <div class="lab" id="wtracklab">신작 18주 추적</div>
+    <details class="panel pwide tbox" id="wtrackbox" aria-label="신작 18주 추적">
+      <summary class="lab tsum"><span id="wtracklab">신작 18주 추적</span><span class="tsum-hint" aria-hidden="true"></span></summary>
       <div class="track" id="wtrack"></div>
-    </div>
+    </details>
   </section>
   <section class="panels" id="gpanels" hidden>
     <div class="panel" aria-label="이 장르 작품의 앱 주간 진입">
@@ -133,6 +133,6 @@
 
 <script src="xlsx.js?v=1"></script>
 <script src="cmt.js?v=5"></script>
-<script src="app.js?v=83"></script>
+<script src="app.js?v=84"></script>
 </body>
 </html>

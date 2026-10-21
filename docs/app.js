@@ -892,6 +892,12 @@ function trackChart(ranks, dates){
   return `<svg class="tch" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(md(dates[fi])+" "+fv+"위 → "+md(dates[li])+" "+lv+"위, 최고 "+best+"위")}">${guide}${line}${dots}${firstLab}${lastLab}${axis}</svg>`;
 }
 let wsLoading=null, WTRACK_ALL=false;
+/* 신작 18주 추적 칸 접기·펼치기 — 기본 접힘, 마지막 상태를 이 브라우저에 기억 */
+function wireTrackBox(){
+  const box=document.getElementById("wtrackbox"); if(!box||box._wired) return; box._wired=true;
+  try{ box.open = localStorage.getItem("wt-track-open")==="1"; }catch(e){}
+  box.addEventListener("toggle", ()=>{ try{ localStorage.setItem("wt-track-open", box.open?"1":"0"); }catch(e){} });
+}
 function renderWeekdaySummary(){
   if(!(src==="weekday"&&variant==="app")) return;
   if(!wsLoading) wsLoading=Promise.all([ensureSeries(),ensureSeriesDetails(),ensureDetails(),ensureRevHist(),ensureNewTrack()]).then(()=>{ if(src==="weekday"&&variant==="app") renderWeekdaySummary(); }).catch(()=>{});
@@ -940,6 +946,7 @@ function renderWeekdaySummary(){
   // 신작 18주 추적
   const wkOf=id=>{ const f=NTF[id]; if(!f) return ""; const dd=Math.floor((Date.parse(awdDate(k))-Date.parse(f))/864e5); return (NTRACK.src&&NTRACK.src[id]==="seen")?`첫 확인 ${f.slice(5).replace("-","/")}`:`${Math.floor(dd/7)+1}주차`; };
   const show=WTRACK_ALL?trk:trk.slice(0,10);
+  wireTrackBox();
   document.getElementById("wtracklab").textContent=`신작 18주 추적 · ${tabL} 첫 주 TOP${TN} 진입 ${trk.length}작`;
   document.getElementById("wtrack").innerHTML=!NTRACK?`<div class="gmore">불러오는 중…</div>`:!trk.length?`<div class="gmore">이 탭에 첫 주 TOP${TN}에 들었던 신작이 없어요</div>`:show.map(x=>{
     const vals=x.ranks.filter(v=>v!=null), first=vals[0], diff=(first!=null&&x.d.r!=null)?first-x.d.r:0;
