@@ -10,7 +10,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="style.css?v=43">
+<link rel="stylesheet" href="style.css?v=44">
 </head>
 <body>
 <div class="wrap">
@@ -65,6 +65,20 @@
     </div>
   </section>
 
+  <section class="panels" id="gpanels" hidden>
+    <div class="panel" aria-label="이 장르 작품의 앱 주간 진입">
+      <div class="lab">이 장르 100작 · 앱 주간 남녀 순위 분포</div>
+      <div class="bar" id="gdistbar"></div>
+      <div class="dleg" id="gdistleg"></div>
+      <div class="lab glab2" id="gentlab">앱 주간 TOP100에 든 작품</div>
+      <div class="gap" id="gent"></div>
+    </div>
+    <div class="panel" aria-label="이 장르 주간 거래액 상위">
+      <div class="lab">주간 거래액 TOP 5 · 선호 성별</div>
+      <div class="gap" id="gmoney"></div>
+    </div>
+  </section>
+
   <div class="controls">
     <div class="search">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>
@@ -93,6 +107,6 @@
 
 <script src="xlsx.js?v=1"></script>
 <script src="cmt.js?v=5"></script>
-<script src="app.js?v=78"></script>
+<script src="app.js?v=79"></script>
 </body>
 </html>

@@ -437,3 +437,10 @@ footer a:hover{text-decoration:underline}
 .morig .olink:hover, .morig .olink:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
 .morig .ometa{font-weight:500; color:var(--muted); font-size:11px}
 .morig .onone{font-size:11.5px; color:var(--faint)}
+
+/* 앱 장르 주간 요약 */
+.lean-b{background:var(--surface-2); color:var(--muted)}
+.glab2{margin-top:16px}
+.gmore{font-size:11.5px; color:var(--faint); margin-top:2px}
+.gmorebtn{align-self:flex-start; margin-top:4px; font:inherit; font-size:12px; font-weight:600; color:var(--accent-ink); background:var(--accent-soft); border:0; border-radius:7px; padding:4px 10px; cursor:pointer}
+.gmorebtn:focus-visible{outline:2px solid var(--accent); outline-offset:1px}
