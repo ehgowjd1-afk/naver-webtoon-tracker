@@ -5,6 +5,7 @@
  * m.comic(모바일 웹) 인기순과 실제 앱 순서는 다름(2026-10-18 목요일 같은 자리 8/110) → 사이트 '요일별 › 앱'은 이 데이터.
  * 저장: docs/data/app_weekday.json = {date, updated, tabDates:{탭:날짜}, tabs:{all|all_f|all_m(전체 탭 여성·남성 인기순)|new|dailyPlus|mon..sun:[{r,t,a,id,th?,b[]}]}}
  *       docs/data/app_weekday_history.json = {dates:[], series:{탭:{titleId:[순위…]}}, names:{titleId:[제목,작가,썸네일]}} (최근 60일) — 사이트 달력으로 그날 순위·전날 대비 ▲▼
+ *       docs/data/app_weekday_newtrack.json = 신작(런칭 18주 안)만 130일 보관(scripts/lib/app_newtrack.cjs) — 요일별 › 앱 요약의 신작 18주 추적
  *   node scripts/collect_app_weekday.js [--push] [--tabs=all,mon] [--dry] [--force]
  */
 const fs = require("fs");
@@ -156,5 +157,6 @@ function updateHistory(tabs) {
   for (const k in tabs) { out.tabs[k] = tabs[k]; out.tabDates[k] = TODAY; }
   fs.writeFileSync(path.join(OUT, "app_weekday.json"), JSON.stringify(out));
   updateHistory(tabs);
-  if (PUSH) P.pushPaths(ROOT, ["docs/data/app_weekday.json", "docs/data/app_weekday_history.json"], `local: 앱 요일별 인기순(폰) ${TODAY}`);
+  try { log("신작 18주 추적", JSON.stringify(require("./lib/app_newtrack.cjs").update(OUT, TODAY))); } catch (e) { log("신작 추적 실패:", e.message); }
+  if (PUSH) P.pushPaths(ROOT, ["docs/data/app_weekday.json", "docs/data/app_weekday_history.json", "docs/data/app_weekday_newtrack.json"], `local: 앱 요일별 인기순(폰) ${TODAY}`);
 })();
