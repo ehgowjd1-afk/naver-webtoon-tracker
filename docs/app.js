@@ -704,14 +704,23 @@ function renderControls(){
 }
 document.getElementById("q").addEventListener("input", e=>{ query=e.target.value.trim().toLowerCase(); renderList(); });
 
+/* 요약 칸 작품 이름 → 누르면 목록과 같은 상세 창. 키(작품 번호)로 행을 기억해 두고 document 클릭 위임으로 엶 */
+const SUMROWS=new Map();
+function sumName(d, label){
+  if(!d) return esc(label||"");
+  const info=d.id!=null?LOOKUP.id[d.id]:null, key=d.id!=null?String(d.id):"n:"+d.name;
+  SUMROWS.set(key, { r:d.r??null, id:d.id??null, name:d.name||(info?info[0]:""), a:d.a!=null&&d.a!==""?d.a:(info?info[2]:""), th:d.th||(info?info[1]:""), m:d.m||0, s:d.s||0, b:d.b||[] });
+  return `<button type="button" class="slink" data-sumkey="${esc(key)}">${esc(label!=null?label:d.name)}</button>`;
+}
+document.addEventListener("click", e=>{ const b=e.target.closest("[data-sumkey]"); if(!b) return; const d=SUMROWS.get(b.dataset.sumkey); if(d) openModal(d); });
 function renderStats(){
   const D=viewRows(), caps=SOURCES[src].caps;
   const up=[...D].filter(d=>d.m>0).sort((a,b)=>b.m-a.m), down=[...D].filter(d=>d.m<0).sort((a,b)=>a.m-b.m);
   const news=D.filter(d=>d.b.includes("신작")||d.b.includes("진입")||d.b.includes("신규")), streaks=[...D].filter(d=>d.s>0).sort((a,b)=>b.s-a.s);
   const tu=up[0],td=down[0],ts=streaks[0];
   const tiles=[
-    {lab:"▲ 최대 상승",cls:"up",big:tu?esc(tu.name):"—",sub:tu?`${tu.r}위 · ▲${tu.m}`:""},
-    {lab:"▼ 최대 하락",cls:"down",big:td?esc(td.name):"—",sub:td?`${td.r}위 · ▼${Math.abs(td.m)}`:""},
+    {lab:"▲ 최대 상승",cls:"up",big:tu?sumName(tu):"—",sub:tu?`${tu.r}위 · ▲${tu.m}`:""},
+    {lab:"▼ 최대 하락",cls:"down",big:td?sumName(td):"—",sub:td?`${td.r}위 · ▼${Math.abs(td.m)}`:""},
     {lab:"🆕 신작·진입",cls:"acc",big:`${news.length}작품`,sub:news.slice(0,2).map(n=>n.name).join(", ")+(news.length>2?" 외":"")},
     caps.streak?{lab:"👑 최장 연속",cls:"acc",big:ts?`${ts.s}주`:"—",sub:ts?esc(ts.name):""}
                :{lab:"📈 상승 작품",cls:"acc",big:`${up.length}작품`,sub:`하락 ${down.length} · 유지 ${D.filter(d=>d.m===0).length}`}
@@ -832,12 +841,12 @@ function genreLean(d, C){
 /* 오른쪽 패널 보조 지표: 전주 대비 거래액 상승 TOP3 · 원작 웹툰 비율(목록 상위 N) */
 function moneyUpHtml(list, leanFn){
   const ups=list.filter(x=>x.wr&&x.wr.dealDelta>0).sort((a,b)=>b.wr.dealDelta-a.wr.dealDelta).slice(0,3);
-  return ups.length?ups.map(x=>{ const l=leanFn(x); return `<div class="grow"><span class="gt" title="${esc(x.d.name)}">${x.d.r}. ${esc(x.d.name)}</span><span class="gr">▲${wonFmt(x.wr.dealDelta)} · 이번 주 ${wonFmt(x.wr.deal)}</span>${leanTag(l&&l.tag)}</div>`; }).join(""):`<div class="gmore">전주보다 거래액이 오른 작품이 없어요</div>`;
+  return ups.length?ups.map(x=>{ const l=leanFn(x); return `<div class="grow"><span class="gt" title="${esc(x.d.name)}">${x.d.r}. ${sumName(x.d)}</span><span class="gr">▲${wonFmt(x.wr.dealDelta)} · 이번 주 ${wonFmt(x.wr.deal)}</span>${leanTag(l&&l.tag)}</div>`; }).join(""):`<div class="gmore">전주보다 거래액이 오른 작품이 없어요</div>`;
 }
 function origStatHtml(rows, N, label){
   const top=rows.slice(0,N); if(!top.length) return "";
   const o=top.filter(d=>isOrig(d.id)), pc=Math.round(o.length/top.length*100);
-  return `<div class="obar"><span style="width:${pc}%"></span></div><div class="otxt"><b>${label} ${top.length}작 중 ${o.length}작(${pc}%)</b>이 웹소설 원작${o.length?` · 상위: ${o.slice(0,3).map(d=>esc(d.name)).join(", ")}`:""}</div>`;
+  return `<div class="obar"><span style="width:${pc}%"></span></div><div class="otxt"><b>${label} ${top.length}작 중 ${o.length}작(${pc}%)</b>이 웹소설 원작${o.length?` · 상위: ${o.slice(0,3).map(d=>sumName(d)).join(", ")}`:""}</div>`;
 }
 function leanTag(t){ return t?`<span class="lean ${t[0]==="f"?"lean-f":t[0]==="m"?"lean-m":"lean-b"}">${esc(t[1])}</span>`:""; }
 function renderGenreSummary(){
@@ -852,9 +861,9 @@ function renderGenreSummary(){
   const leanBig = !ent.length ? "—" : mo>fo*1.5 ? "남성 쪽" : fo>mo*1.5 ? "여성 쪽" : "고르게";
   const tiles=[
     {lab:"📊 앱 주간 TOP100 진입", cls:"acc", big: C?`${ent.length}작품`:"불러오는 중", sub: ent.slice(0,2).map(x=>x.d.name).join(", ")+(ent.length>2?" 외":"")},
-    {lab:"💰 주간 거래액 1위", cls:"acc", big: top?esc(top.d.name):(ready?"—":"불러오는 중"), sub: top?`${wonFmt(top.wr.deal)} · 장르 ${top.d.r}위${top.ln.wk?" · 앱주간 "+(top.ln.a?"전체 "+top.ln.a+"위":"진입"):""}`:""},
+    {lab:"💰 주간 거래액 1위", cls:"acc", big: top?sumName(top.d):(ready?"—":"불러오는 중"), sub: top?`${wonFmt(top.wr.deal)} · 장르 ${top.d.r}위${top.ln.wk?" · 앱주간 "+(top.ln.a?"전체 "+top.ln.a+"위":"진입"):""}`:""},
     {lab:"♂♀ 앱 주간 진입작 성향", cls: leanBig==="남성 쪽"?"down":leanBig==="여성 쪽"?"up":"acc", big: leanBig, sub: ent.length?`남성 ${mo} · 동시 ${bo} · 여성 ${fo} (동시=순위 50위 차 이내)`:"앱 주간에 든 작품 없음"},
-    up?{lab:"▲ 장르 최대 상승", cls:"up", big: esc(up.name), sub: `${up.r}위 · ▲${up.m}`}
+    up?{lab:"▲ 장르 최대 상승", cls:"up", big: sumName(up), sub: `${up.r}위 · ▲${up.m}`}
       :{lab:"🆕 신작", cls:"acc", big: `${news}작품`, sub: "순위변동은 폰 수집 주에만"}
   ];
   document.getElementById("tiles").innerHTML=tiles.map(t=>`<div class="tile"><div class="lab">${t.lab}</div><div class="big ${t.cls}">${t.big}</div><div class="sub2">${esc(t.sub)}</div></div>`).join("");
@@ -863,12 +872,12 @@ function renderGenreSummary(){
   document.getElementById("gdistbar").innerHTML=`<span style="background:var(--down);width:${mo/tot*100}%"></span><span style="background:var(--same);width:${bo/tot*100}%"></span><span style="background:var(--up);width:${fo/tot*100}%"></span><span style="background:var(--surface-2);width:${Math.max(0,no)/tot*100}%"></span>`;
   document.getElementById("gdistleg").innerHTML=`<span><i style="background:var(--down)"></i>남성순위 <b>${pc(mo)}%</b></span><span><i style="background:var(--same)"></i>동시(비슷한 순위) <b>${pc(bo)}%</b></span><span><i style="background:var(--up)"></i>여성순위 <b>${pc(fo)}%</b></span><span><i style="background:var(--surface-2);border:1px solid var(--border)"></i>앱 주간 남녀 밖 <b>${pc(Math.max(0,no))}%</b></span>`;
   document.getElementById("gentlab").textContent=`앱 주간 TOP100에 든 작품 · ${ent.length}작`;
-  document.getElementById("gent").innerHTML=ent.length?ent.slice(0,GENT_ALL?ent.length:8).map(x=>`<div class="grow"><span class="gt" title="${esc(x.d.name)}">${x.d.r}. ${esc(x.d.name)}</span><span class="gr">${esc(x.ln.txt)}</span>${leanTag(x.ln.tag)}</div>`).join("")+(ent.length>8?`<button class="gmorebtn" id="gentmore">${GENT_ALL?"접기":"외 "+(ent.length-8)+"작 더 보기"}</button>`:""):`<div class="gmore">${C?"이번 주 앱 주간 TOP100에 든 작품이 없어요":"앱 주간 순위 불러오는 중…"}</div>`;
+  document.getElementById("gent").innerHTML=ent.length?ent.slice(0,GENT_ALL?ent.length:8).map(x=>`<div class="grow"><span class="gt" title="${esc(x.d.name)}">${x.d.r}. ${sumName(x.d)}</span><span class="gr">${esc(x.ln.txt)}</span>${leanTag(x.ln.tag)}</div>`).join("")+(ent.length>8?`<button class="gmorebtn" id="gentmore">${GENT_ALL?"접기":"외 "+(ent.length-8)+"작 더 보기"}</button>`:""):`<div class="gmore">${C?"이번 주 앱 주간 TOP100에 든 작품이 없어요":"앱 주간 순위 불러오는 중…"}</div>`;
   const gm=document.getElementById("gentmore"); if(gm) gm.onclick=()=>{ GENT_ALL=!GENT_ALL; renderGenreSummary(); };
   document.getElementById("gmoneyup").innerHTML=!ready?"":moneyUpHtml(money, x=>x.ln);
   document.getElementById("gorig").innerHTML=origStatHtml(D, 100, "이 장르 TOP100");
   // 오른쪽: 주간 거래액 TOP 5 + 선호 성별
-  document.getElementById("gmoney").innerHTML=!ready?`<div class="gmore">매출 데이터 불러오는 중…</div>`:money.length?money.slice(0,5).map(x=>`<div class="grow"><span class="gt" title="${esc(x.d.name)}">${x.d.r}. ${esc(x.d.name)}</span><span class="gr">${wonFmt(x.wr.deal)}${x.ln.txt?" · "+esc(x.ln.txt):""}</span>${leanTag(x.ln.tag)}</div>`).join("")+`<div class="gmore">시리즈 다운로드로 추정한 그 주(연재요일 기준) 거래액 · 성향 = 앱 주간 남/여 순위, 밖이면 앱 요일 남/여 순위</div>`:`<div class="gmore">이 장르에 주간 거래액이 잡힌 작품이 없어요</div>`;
+  document.getElementById("gmoney").innerHTML=!ready?`<div class="gmore">매출 데이터 불러오는 중…</div>`:money.length?money.slice(0,5).map(x=>`<div class="grow"><span class="gt" title="${esc(x.d.name)}">${x.d.r}. ${sumName(x.d)}</span><span class="gr">${wonFmt(x.wr.deal)}${x.ln.txt?" · "+esc(x.ln.txt):""}</span>${leanTag(x.ln.tag)}</div>`).join("")+`<div class="gmore">시리즈 다운로드로 추정한 그 주(연재요일 기준) 거래액 · 성향 = 앱 주간 남/여 순위, 밖이면 앱 요일 남/여 순위</div>`:`<div class="gmore">이 장르에 주간 거래액이 잡힌 작품이 없어요</div>`;
 }
 /* 요일별 › 앱 요약 — 지금 탭(전체·신작·매일+·월~일)의 인기순과 여성·남성 인기순(같은 날 폰 수집)으로.
    남녀 분포 = 인기순 TOP N 작품이 여성·남성 인기순 TOP N에 드는지(전체 100·매일+ 50·신작 20·요일 30). 최대 상승·하락 = 전날 수집 대비.
@@ -920,10 +929,10 @@ function renderWeekdaySummary(){
   const money=ready?B.map(d=>({d, wr:weeklyRevenue(d.name, dowOf(d), "")})).filter(x=>x.wr&&x.wr.deal>0).sort((a,b)=>b.wr.deal-a.wr.deal):[];
   const best=trk[0];
   const tiles=[
-    {lab:"▲ 최대 상승 (전날 대비"+(lim<1e9?", "+lim+"위 안":"")+")", cls:"up", big: up?esc(up.name):"—", sub: up?`${up.r}위 · ▲${up.m}`:"오르내린 작품 없음"},
-    {lab:"▼ 최대 하락 (전날 대비"+(lim<1e9?", "+lim+"위 안":"")+")", cls:"down", big: dn?esc(dn.name):"—", sub: dn?`${dn.r}위 · ▼${Math.abs(dn.m)}`:"오르내린 작품 없음"},
+    {lab:"▲ 최대 상승 (전날 대비"+(lim<1e9?", "+lim+"위 안":"")+")", cls:"up", big: up?sumName(up):"—", sub: up?`${up.r}위 · ▲${up.m}`:"오르내린 작품 없음"},
+    {lab:"▼ 최대 하락 (전날 대비"+(lim<1e9?", "+lim+"위 안":"")+")", cls:"down", big: dn?sumName(dn):"—", sub: dn?`${dn.r}위 · ▼${Math.abs(dn.m)}`:"오르내린 작품 없음"},
     {lab:`🆕 신작 (첫 주 TOP${TN} 진입)`, cls:"acc", big: NTRACK?`${trk.length}작품`:"불러오는 중", sub: best&&best.d.r?`최고 ${best.d.name} ${best.d.r}위`:""},
-    {lab:"💰 주간 거래액 1위", cls:"acc", big: money[0]?esc(money[0].d.name):(ready?"—":"불러오는 중"), sub: money[0]?`${wonFmt(money[0].wr.deal)} · ${tabL} ${money[0].d.r}위`:""}
+    {lab:"💰 주간 거래액 1위", cls:"acc", big: money[0]?sumName(money[0].d):(ready?"—":"불러오는 중"), sub: money[0]?`${wonFmt(money[0].wr.deal)} · ${tabL} ${money[0].d.r}위`:""}
   ];
   document.getElementById("tiles").innerHTML=tiles.map(t=>`<div class="tile"><div class="lab">${t.lab}</div><div class="big ${t.cls}">${t.big}</div><div class="sub2">${esc(t.sub)}</div></div>`).join("");
   // 남녀 분포 + 온도차
@@ -937,10 +946,10 @@ function renderWeekdaySummary(){
   document.getElementById("wdistbar").innerHTML=hasG?`<span style="background:var(--down);width:${mo/tot*100}%"></span><span style="background:var(--same);width:${bo/tot*100}%"></span><span style="background:var(--up);width:${fo/tot*100}%"></span><span style="background:var(--surface-2);width:${no/tot*100}%"></span>`:"";
   document.getElementById("wdistleg").innerHTML=hasG?`<span><i style="background:var(--down)"></i>남성순위 <b>${pc(mo)}%</b></span><span><i style="background:var(--same)"></i>동시(비슷한 순위) <b>${pc(bo)}%</b></span><span><i style="background:var(--up)"></i>여성순위 <b>${pc(fo)}%</b></span>${no?`<span><i style="background:var(--surface-2);border:1px solid var(--border)"></i>남녀 순위 없음 <b>${pc(no)}%</b></span>`:""}`:`<span>이 날짜엔 여성·남성 인기순 수집 기록이 없어요</span>`;
   document.getElementById("wgaphint").innerHTML=hasG?`인기순 TOP${N} 중 여성·남성 인기순 차이가 ${TOL}위 이내인 <b>동시</b> 작품은 <b>${bo}작품</b> · 한쪽으로 치우친 작품:`:"";
-  const grow=x=>`<div class="grow"><span class="gt" title="${esc(x.d.name)}">${x.d.r}. ${esc(x.d.name)}</span><span class="gr">${esc(x.g.txt)}</span>${leanTag(x.g.tag)}</div>`;
+  const grow=x=>`<div class="grow"><span class="gt" title="${esc(x.d.name)}">${x.d.r}. ${sumName(x.d)}</span><span class="gr">${esc(x.g.txt)}</span>${leanTag(x.g.tag)}</div>`;
   document.getElementById("wgap").innerHTML=hasG?(skew(sideF,"f","m").map(grow).join("")+skew(sideM,"m","f").map(grow).join("")||`<div class="gmore">치우친 작품 없음</div>`):"";
   // 주간 거래액 TOP5 + 선호
-  document.getElementById("wmoney").innerHTML=!ready?`<div class="gmore">매출 데이터 불러오는 중…</div>`:money.length?money.slice(0,5).map(x=>{ const l=lean(x.d); return `<div class="grow"><span class="gt" title="${esc(x.d.name)}">${x.d.r}. ${esc(x.d.name)}</span><span class="gr">${wonFmt(x.wr.deal)}${l.txt?" · "+l.txt:""}</span>${leanTag(l.tag)}</div>`; }).join("")+`<div class="gmore">시리즈 다운로드로 추정한 그 주(연재요일 기준) 거래액 · 성향 = 이 탭 여성·남성 인기순 차이</div>`:`<div class="gmore">이 탭에 주간 거래액이 잡힌 작품이 없어요</div>`;
+  document.getElementById("wmoney").innerHTML=!ready?`<div class="gmore">매출 데이터 불러오는 중…</div>`:money.length?money.slice(0,5).map(x=>{ const l=lean(x.d); return `<div class="grow"><span class="gt" title="${esc(x.d.name)}">${x.d.r}. ${sumName(x.d)}</span><span class="gr">${wonFmt(x.wr.deal)}${l.txt?" · "+l.txt:""}</span>${leanTag(l.tag)}</div>`; }).join("")+`<div class="gmore">시리즈 다운로드로 추정한 그 주(연재요일 기준) 거래액 · 성향 = 이 탭 여성·남성 인기순 차이</div>`:`<div class="gmore">이 탭에 주간 거래액이 잡힌 작품이 없어요</div>`;
   document.getElementById("wmoneyup").innerHTML=!ready?"":moneyUpHtml(money, x=>lean(x.d));
   document.getElementById("worig").innerHTML=origStatHtml(B, N, `인기순 TOP${N}`);
   // 신작 18주 추적
@@ -951,7 +960,7 @@ function renderWeekdaySummary(){
   document.getElementById("wtrack").innerHTML=!NTRACK?`<div class="gmore">불러오는 중…</div>`:!trk.length?`<div class="gmore">이 탭에 첫 주 TOP${TN}에 들었던 신작이 없어요</div>`:show.map(x=>{
     const vals=x.ranks.filter(v=>v!=null), first=vals[0], diff=(first!=null&&x.d.r!=null)?first-x.d.r:0;
     const chg=x.d.r==null?`<span class="tchg down">목록 밖</span>`:vals.length>1?(diff>0?`<span class="tchg up">▲${diff}</span>`:diff<0?`<span class="tchg down">▼${-diff}</span>`:`<span class="tchg">유지</span>`):`<span class="tchg">첫 기록</span>`;
-    return `<div class="trow"><span class="trk">${x.d.r??"–"}</span><span class="tname" title="${esc(x.d.name)}">${esc(x.d.name)}</span><span class="twk">${esc(wkOf(x.id))}<br><span class="tent">첫 주 ${x.entry}위</span></span>${trackChart(x.ranks, NTD)}${chg}</div>`;
+    return `<div class="trow"><span class="trk">${x.d.r??"–"}</span><span class="tname" title="${esc(x.d.name)}">${sumName(x.d)}</span><span class="twk">${esc(wkOf(x.id))}<br><span class="tent">첫 주 ${x.entry}위</span></span>${trackChart(x.ranks, NTD)}${chg}</div>`;
   }).join("")+(trk.length>10?`<button class="gmorebtn" id="wtrackmore">${WTRACK_ALL?"접기":"외 "+(trk.length-10)+"작 더 보기"}</button>`:"")+`<div class="gmore">런칭 첫 주에 이 탭 TOP${TN}에 들었던 신작만 · 떨어져도 런칭 18주까지 계속 추적 · 첫 주 = 런칭일(기록 전 런칭이면 첫 기록일)부터 7일 · 기록은 ${NTD.length?NTD[0].slice(5).replace("-","/"):"-"}부터(매일 쌓임)</div>`;
   const tm=document.getElementById("wtrackmore"); if(tm) tm.onclick=()=>{ WTRACK_ALL=!WTRACK_ALL; renderWeekdaySummary(); };
 }
@@ -962,7 +971,7 @@ function renderGap(){
   const both=[...fm.keys()].filter(t=>mm.has(t));
   const rows=both.map(t=>({t,f:fm.get(t),m:mm.get(t),gap:mm.get(t)-fm.get(t)})).sort((a,b)=>Math.abs(b.gap)-Math.abs(a.gap)).slice(0,5);
   document.getElementById("gaphint").innerHTML=`남·여 TOP${Math.max(F.length,M.length)}에 <b>동시</b> 등장은 <b>${both.length}작품</b>뿐 — 나머지는 성별로 갈립니다.`;
-  document.getElementById("gap").innerHTML=rows.map(r=>{ const lean=r.gap>0?`<span class="lean lean-f">여성 +${r.gap}</span>`:`<span class="lean lean-m">남성 +${-r.gap}</span>`; return `<div class="grow"><span class="gt">${esc(r.t)}</span><span class="gr">남 ${r.m} · 여 ${r.f}</span>${lean}</div>`; }).join("");
+  document.getElementById("gap").innerHTML=rows.map(r=>{ const lean=r.gap>0?`<span class="lean lean-f">여성 +${r.gap}</span>`:`<span class="lean lean-m">남성 +${-r.gap}</span>`; return `<div class="grow"><span class="gt">${sumName(enrichRow((APP.charts["전체"]||[]).find(x=>x.t===r.t)||{t:r.t,r:null}), r.t)}</span><span class="gr">남 ${r.m} · 여 ${r.f}</span>${lean}</div>`; }).join("");
 }
 
 function moveHtml(m){
