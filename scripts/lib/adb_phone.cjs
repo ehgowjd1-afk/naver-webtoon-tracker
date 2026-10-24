@@ -40,9 +40,15 @@ function dismissPopups(nodes) {   // 앱 안내 팝업("닫기")이 떠 있으�
 }
 function ensureReady() {
   if (!/\tdevice\b/.test(adb("devices"))) throw new Error("폰이 연결돼 있지 않음(USB 디버깅 확인)");
-  if (!/mWakefulness=Awake/.test(adb("shell", "dumpsys", "power"))) { adb("shell", "input", "keyevent", "KEYCODE_WAKEUP"); wait(1500); }
+  const awake = () => /mWakefulness=Awake/.test(adb("shell", "dumpsys", "power"));
   const locked = () => /isKeyguardShowing=true|mDreamingLockscreen=true/.test(adb("shell", "dumpsys", "window"));
-  if (locked()) { swipe(540, 1800, 540, 500, 300); wait(1500); }
+  // 밀어서 여는 잠금 화면은 wm dismiss-keyguard로 바로 닫음. 예전 스와이프만으로는 안 풀린 적 있음(2026-10-24: 알림 카드·'긴급전화' 버튼에 걸린 듯).
+  // 잠금 화면은 몇 초면 다시 꺼지므로 깨운 직후에 풂
+  for (let k = 0; k < 3 && (!awake() || locked()); k++) {
+    adb("shell", "input", "keyevent", "KEYCODE_WAKEUP"); wait(1000);
+    adb("shell", "wm", "dismiss-keyguard"); wait(1500);
+    if (locked()) { swipe(540, 1800, 540, 500, 300); wait(1500); }
+  }
   if (locked()) throw new Error("폰 화면이 잠겨 있음 — 잠금(PIN 등)을 풀어 두면 다음부터 수집");
   if (!adb("shell", "pm", "list", "packages", PKG).includes(PKG)) throw new Error("네이버웹툰 앱이 설치돼 있지 않음");
 }
