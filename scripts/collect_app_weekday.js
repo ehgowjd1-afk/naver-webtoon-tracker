@@ -75,15 +75,16 @@ function parseItem(d) {
   if (/만 18세 이상/.test(d)) b.push("19금");
   return { t: t.trim(), a, b };
 }
-// 지금 탭 목록을 끝(구역 제목)까지 읽기
+// 지금 탭 목록을 끝(구역 제목)까지 읽기. lastEnd = 마지막으로 읽은 목록이 끝난 이유(짧게 읽혔을 때 로그용)
+let lastEnd = "";
 function scrapeTab(max = Infinity) {
-  const got = new Map(); let stale = 0, ended = false;
-  for (let i = 0; i < 400 && !ended && stale < 3 && got.size < max; i++) {
+  const got = new Map(); let stale = 0, ended = false, headTxt = "", i = 0;
+  for (; i < 400 && !ended && stale < 3 && got.size < max; i++) {
     const nodes = dump();
     const bar = barNodes(nodes);
     const barY = bar.length ? Math.max(...bar.map((n) => n.b[3])) : 0;
     const head = nodes.find((n) => n.cls === "TextView" && n.t && n.b.length && n.b[1] > barY && n.b[1] < 2028 && n.b[2] - n.b[0] > 500);
-    const endY = head ? head.b[1] : 99999; if (head) ended = true;
+    const endY = head ? head.b[1] : 99999; if (head) { ended = true; headTxt = head.t; }
     const items = nodes.filter((n) => n.cls === "Button" && /^작품명 /.test(n.d) && n.b.length && n.b[1] >= barY - 10 && n.b[1] < endY && n.b[3] <= 2030)
       .sort((a, b) => a.b[1] - b.b[1] || a.b[0] - b.b[0]);
     let added = 0;
@@ -91,6 +92,7 @@ function scrapeTab(max = Infinity) {
     stale = added ? 0 : stale + 1;
     if (!ended) { swipe(540, 1900, 540, 900, 900); wait(600); }
   }
+  lastEnd = ended ? `구역 제목 '${headTxt}'` : got.size >= max ? "상한" : stale >= 3 ? "3번 밀어도 새 작품 없음" : `${i}번 밀고 멈춤`;
   return [...got.values()].slice(0, max).map((x, i) => ({ r: i + 1, ...x }));
 }
 
@@ -126,13 +128,24 @@ function updateHistory(tabs) {
         toTop();
         if (!selectTab(label)) { log(`  [${label}] 탭을 못 찾음`); continue; }
         const orig = sortLabel(dump());
-        for (const so of SORTS) {
-          const k = key + SORT_KEYS[so];
-          if (sortLabel(dump()) !== so) { if (!setSort(so)) { log(`  [${label}] 정렬을 ${so}으로 못 바꿈(지금: ${sortLabel(dump()) || "?"})`); continue; } toTop(); }
-          const list = scrapeTab(key === "all" ? ALL_MAX : Infinity);
+        const lists = {}, ends = {};   // 정렬별로 읽은 목록·끝난 이유
+        const read = (so) => {
+          if (sortLabel(dump()) !== so) { if (!setSort(so)) { log(`  [${label}] 정렬을 ${so}으로 못 바꿈(지금: ${sortLabel(dump()) || "?"})`); return null; } toTop(); }
+          const list = scrapeTab(key === "all" ? ALL_MAX : Infinity); ends[so] = lastEnd;
           log(`  [${label} · ${so}] ${list.length}개 · 1~3위 ${list.slice(0, 3).map((x) => x.t).join(", ")}`);
-          if (list.length >= 10) tabs[k] = list;
+          return list;
+        };
+        for (const so of SORTS) { const l = read(so); if (l) lists[so] = l; }
+        // 한 탭은 정렬만 다르고 작품은 같음 → 어느 정렬만 3개 넘게 짧으면(스크롤이 중간에 끊김) 한 번 더 읽어 긴 쪽을 씀.
+        // 2026-10-24 목요 인기순이 100에서 끊겨 101~114위가 빠짐(여성·남성은 114). 같은 탭 다른 정렬이 없으면 전에 받은 같은 목록 길이와 비교
+        if (key !== "all") for (const so of Object.keys(lists)) {
+          const want = Math.max(...Object.values(lists).map((l) => l.length), ((prev.tabs || {})[key + SORT_KEYS[so]] || []).length);
+          if (want - lists[so].length < 3) continue;
+          log(`  [${label} · ${so}] ${lists[so].length}개로 짧음(기대 ${want}, 끝난 이유: ${ends[so]}) — 한 번 더 읽음`);
+          const again = read(so);
+          if (again && again.length > lists[so].length) lists[so] = again;
         }
+        for (const so in lists) if (lists[so].length >= 10) tabs[key + SORT_KEYS[so]] = lists[so];
         if (orig && orig !== sortLabel(dump())) changed.push([label, orig]);   // 끝나고 원래 정렬로
       } catch (e) { log(`  [${label}] 실패: ${e.message}`); }
     }
