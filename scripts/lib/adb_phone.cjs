@@ -78,7 +78,7 @@ async function fillIds(list, lookup, extra = {}) {
 function pushPaths(root, paths, msg) {
   const { execSync } = require("child_process"), path = require("path");
   try {
-    try { execSync(`git -C "${root}" fetch -q origin main`, { stdio: "inherit" }); execSync(`node "${path.join(root, "scripts", "merge_remote.js")}" origin/main`, { stdio: "inherit" }); } catch (e) { log("원격 합치기 실패 — 그대로 올림:", e.message); }
+    try { execSync(`git -C "${root}" fetch -q origin main`, { stdio: "inherit" }); execSync(`node "${path.join(root, "scripts", "merge_remote.js")}" origin/main ${paths.join(" ")}`, { stdio: "inherit" }); } catch (e) { log("원격 합치기 실패 — 그대로 올림:", e.message); }   // 올릴 파일만 합침(다른 파일이 수정된 채 남지 않게)
     execSync(`git -C "${root}" add ${paths.join(" ")}`, { stdio: "inherit" });
     execSync(`git -C "${root}" commit -m "${msg}"`, { stdio: "inherit" });
     for (let i = 0; i < 3; i++) { try { execSync(`git -C "${root}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); execSync(`git -C "${root}" push origin main`, { stdio: "inherit" }); log("푸시 완료"); return; } catch (e) { log("재시도", i + 1); } }

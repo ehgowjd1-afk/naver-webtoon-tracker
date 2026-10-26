@@ -11,6 +11,10 @@ const { execSync } = require("child_process");
 const ROOT = path.join(__dirname, "..");
 const DATA = process.env.MERGE_DATA || path.join(ROOT, "docs", "data");   // 시험용으로 바꿀 수 있음
 const REF = process.argv[2] || "origin/main";
+// 합칠 파일을 고를 수 있음: node merge_remote.js origin/main series_details.json details.json app_genre …
+// 로컬 수집기는 자기가 커밋할 파일만 넘겨야 함 — 안 그러면 커밋 안 하는 파일이 수정된 채 남아 다음 pull --autostash에서 충돌(2026-10-26 origins.json 실제 발생). 없으면 전부(클라우드)
+const ONLY = process.argv.slice(3).map((x) => x.replace(/^docs\/data\//, "").replace(/\/$/, ""));
+const want = (name) => !ONLY.length || ONLY.includes(name);
 
 function remoteJSON(name) {
   try { return JSON.parse(execSync(`git -C "${ROOT}" show ${REF}:docs/data/${name}`, { maxBuffer: 512 * 1024 * 1024 }).toString("utf8")); }
@@ -96,6 +100,7 @@ const FILES = [
 ];
 const out = {};
 for (const [name, fn] of FILES) {
+  if (!want(name)) continue;
   try {
     const mine = localJSON(name), rem = remoteJSON(name);
     if (!mine || !rem) continue;
@@ -113,7 +118,7 @@ function mergeAppGenre(mine, rem) {
   }
   return n;
 }
-try {
+if (want("app_genre")) try {
   const ls = (cmd) => { try { return execSync(cmd).toString("utf8").split(/\r?\n/).filter(Boolean); } catch (e) { return []; } };
   const remFiles = ls(`git -C "${ROOT}" ls-tree --name-only ${REF} docs/data/app_genre/`).map((p) => p.split("/").pop());
   for (const f of remFiles) {

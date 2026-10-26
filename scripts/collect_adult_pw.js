@@ -33,7 +33,7 @@ const RUN_DATE = C.runDate();   // 이번 실행 기준 날짜 고정(시작 시
 function pushData() {
   try {
     // 도는 동안 클라우드 수집이 먼저 올린 값을 덮지 않게 원격과 합친 뒤 올림(scripts/merge_remote.js)
-    try { execSync(`git -C "${ROOT}" fetch -q origin main`, { stdio: "inherit" }); execSync(`node "${path.join(ROOT, "scripts", "merge_remote.js")}" origin/main`, { stdio: "inherit" }); } catch (e) { console.log("원격 합치기 실패 — 그대로 올림:", e.message); }
+    try { execSync(`git -C "${ROOT}" fetch -q origin main`, { stdio: "inherit" }); execSync(`node "${path.join(ROOT, "scripts", "merge_remote.js")}" origin/main series_details.json series_extra.json revenue_history.json details.json ep_history.json fav_history.json`, { stdio: "inherit" }); } catch (e) { console.log("원격 합치기 실패 — 그대로 올림:", e.message); }   // 커밋할 파일만 합침
     execSync(`git -C "${ROOT}" add docs/data/series_details.json docs/data/series_extra.json docs/data/revenue_history.json docs/data/details.json docs/data/ep_history.json docs/data/fav_history.json`, { stdio: "inherit" });
     execSync(`git -C "${ROOT}" commit -m "adult: 성인 시리즈 다운수 ${RUN_DATE}"`, { stdio: "inherit" });
     for (let i = 0; i < 3; i++) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); execSync(`git -C "${ROOT}" push origin main`, { stdio: "inherit" }); console.log("푸시 완료"); return; } catch (e) { console.log("재시도", i + 1); } }

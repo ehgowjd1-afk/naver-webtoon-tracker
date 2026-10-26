@@ -105,7 +105,7 @@ const normName  = s => String(s || "").replace(/\s*\[[^\]]*\]\s*$/, "").replace(
 
   if (PUSH) {
     try {
-      try { execSync(`git -C "${ROOT}" fetch -q origin main`, { stdio: "inherit" }); execSync(`node "${path.join(ROOT, "scripts", "merge_remote.js")}" origin/main`, { stdio: "inherit" }); } catch (e) { console.log("원격 합치기 실패 — 그대로 올림:", e.message); }   // 다른 수집 결과 덮지 않게
+      try { execSync(`git -C "${ROOT}" fetch -q origin main`, { stdio: "inherit" }); execSync(`node "${path.join(ROOT, "scripts", "merge_remote.js")}" origin/main series_details.json series_extra.json revenue_history.json`, { stdio: "inherit" }); } catch (e) { console.log("원격 합치기 실패 — 그대로 올림:", e.message); }   // 다른 수집 결과 덮지 않게(커밋할 파일만 합침)
       execSync(`git -C "${ROOT}" add docs/data/series_details.json docs/data/series_extra.json docs/data/revenue_history.json`, { stdio: "inherit" });
       execSync(`git -C "${ROOT}" commit -m "local: 시리즈 검색연동+다운수 갱신 ${DATE}"`, { stdio: "inherit" });
       for (let i = 0; i < 3; i++) { try { execSync(`git -C "${ROOT}" pull --rebase --autostash -X theirs origin main`, { stdio: "inherit" }); execSync(`git -C "${ROOT}" push origin main`, { stdio: "inherit" }); console.log("푸시 완료"); break; } catch (e) { console.log("재시도", i + 1); } }
