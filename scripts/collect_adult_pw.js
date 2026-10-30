@@ -74,6 +74,7 @@ async function healPages() {
 
 async function scrapeDl(page, pn, kind) {
   await page.goto(`https://series.naver.com/${kind}/detail.series?productNo=${pn}`, { waitUntil: "domcontentloaded", timeout: 30000 });
+  if (/\/error\/stopSale/.test(page.url())) return { stop: true, kind };   // 판매중지 상품(안내 페이지로 넘어감)
   const pd = C.parseSeriesDetail(await page.content()); pd.kind = kind; return pd;
 }
 async function adultOk(ctx) {
@@ -90,16 +91,19 @@ async function collectAll(page, opts = {}) {
   const adultSet = new Set(extra.adult);
   // 대상 = '네이버웹툰 성인작품'(코믹)만. 웹소설은 제외(웹툰이 아니므로). 성인목록 or 아직 dl없는 코믹(신작 성인 잡기).
   let targets = [...new Set(Object.keys(pnKind).map(Number))].filter(pn => pnKind[pn] === "comic" && (adultSet.has(pn) || !(sd[pn] && sd[pn].dl)));
+  const nAll = targets.length;
+  targets = targets.filter(pn => !C.stopSkip(sd[pn]));   // 판매중지로 확인된 상품은 30일간 스킵(그 뒤 재확인)
+  const nStop = nAll - targets.length;
   // 오래 안 본 것부터(제일 stale 우선) — cap이 있으면 매 실행마다 조금씩 나눠서 부담 최소화
   targets.sort((a, b) => (extra.seen[a] || 0) - (extra.seen[b] || 0));
   if (targets.length > cap) targets = targets.slice(0, cap);
-  console.log("대상 " + targets.length + "개 수집" + (cap !== Infinity ? " (이번 회차 상한 " + cap + ")" : ""));
+  console.log("대상 " + targets.length + "개 수집" + (nStop ? ` (판매중지 ${nStop}개 제외)` : "") + (cap !== Infinity ? " (이번 회차 상한 " + cap + ")" : ""));
   const today = RUN_DATE;   // 스탬프·히스토리와 같은 날짜(자정 넘김·새벽 4시 전 실행도 일관)
-  let got = 0, done = 0;
+  let got = 0, done = 0, stopped = 0;
   for (const pn of targets) {
     const kind = pnKind[pn] || (sd[pn] && sd[pn].kind) || "comic";
     const had = !!(sd[pn] && sd[pn].dl);
-    try { const pd = await scrapeDl(page, pn, kind); if (pd.dl) { sd[pn] = C.mergeDetail(sd[pn], pd, kind); got++; if (!had) adultSet.add(pn); } } catch (e) {}
+    try { const pd = await scrapeDl(page, pn, kind); if (pd.stop) { sd[pn] = { ...(sd[pn] || { kind }), stop: today }; stopped++; } else if (pd.dl) { sd[pn] = C.mergeDetail(sd[pn], pd, kind); got++; if (!had) adultSet.add(pn); } } catch (e) {}
     extra.seen[pn] = today;
     done++;
     if (done % 10 === 0) { fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd)); console.log("  " + done + "/" + targets.length + " (다운수 " + got + ")"); }
@@ -111,7 +115,7 @@ async function collectAll(page, opts = {}) {
   fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd));
   fs.writeFileSync(path.join(D, "series_extra.json"), JSON.stringify(extra));
   const rh = C.updateRevenueHistory(D, RUN_DATE);   // 이번에 새로 긁은 성인작만 기록 — 안 긁은 비성인작에 어제 값을 베껴 쓰지 않음
-  console.log(`완료: ${got}개 다운수 확보 · 매출히스토리 ${JSON.stringify(rh)}`);
+  console.log(`완료: ${got}개 다운수 확보` + (stopped ? ` · 판매중지 새로 확인 ${stopped}개(30일간 스킵)` : "") + ` · 매출히스토리 ${JSON.stringify(rh)}`);
   return got;
 }
 /* 성인 웹툰 무료/유료 회차: CDP(로그인+연령확인) 브라우저는 성인 comic.naver article/list도 열림 → 미리보기(유료)·무료 계산.
@@ -166,24 +170,25 @@ async function collectAdultPrices(page, opts = {}) {
   const sd = readJSON("series_details.json", {});
   const extra = readJSON("series_extra.json", { adult: [] });
   const adult = new Set((extra.adult || []).map(Number));
-  let targets = Object.keys(sd).filter(pn => sd[pn] && sd[pn].kind === "comic" && sd[pn].dl && !sd[pn].own && adult.has(Number(pn)));
+  let targets = Object.keys(sd).filter(pn => sd[pn] && sd[pn].kind === "comic" && sd[pn].dl && !sd[pn].own && adult.has(Number(pn)) && !C.stopSkip(sd[pn]));   // 판매중지는 회차 목록이 비어 못 읽음 → 스킵
   if (targets.length > cap) targets = targets.slice(0, cap);
   console.log("성인 단가(쿠키) 대상 " + targets.length + "개");
   if (!targets.length) return 0;
   try { await page.goto("https://series.naver.com/", { waitUntil: "domcontentloaded", timeout: 30000 }); } catch (e) {}
-  let got = 0, done = 0;
+  let got = 0, done = 0, stopped = 0;
   for (const pn of targets) {
     try {
       const j = await page.evaluate(async (pn) => { try { const r = await fetch(`/comic/volumeList.series?productNo=${pn}&sortOrder=DESC&totalCount=30`, { credentials: "include" }); if (!r.ok) return null; return await r.json(); } catch (e) { return null; } }, pn);
       const p = priceFromVolumes(j);
       if (p) { sd[pn].rent = p.rent; sd[pn].own = p.own; got++; }
+      else if (await C.isStopSale(pn, "comic")) { sd[pn].stop = RUN_DATE; stopped++; }
     } catch (e) {}
     done++;
     if (done % 20 === 0) { fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd)); console.log("  성인 단가 " + done + "/" + targets.length + " (" + got + ")"); }
     await sleep(dmin + Math.floor(Math.random() * Math.max(0, dmax - dmin)));
   }
   fs.writeFileSync(path.join(D, "series_details.json"), JSON.stringify(sd));
-  console.log(`성인 단가 완료: ${got}개`);
+  console.log(`성인 단가 완료: ${got}개` + (stopped ? ` · 판매중지 ${stopped}개 표시(30일간 스킵)` : ""));
   return got;
 }
 

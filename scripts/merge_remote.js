@@ -31,6 +31,10 @@ function mergeSeriesDetails(mine, rem) {
     if (!m) { mine[k] = r; n++; continue; }
     if (newer(r.at, m.at)) { mine[k] = { ...m, ...r }; n++; }
     for (const f of ["rent", "own"]) if (m[f] == null && r[f] != null) mine[k][f] = r[f];
+    // 판매중지 확인일(stop)은 더 새로운 쪽. 그 뒤에 다운수를 다시 긁었으면(at이 더 새로우면) 판매 재개로 보고 지움
+    const s = mine[k];
+    if (newer(r.stop, s.stop)) { s.stop = r.stop; n++; }
+    if (s.stop && newer(s.at, s.stop)) { delete s.stop; n++; }
   }
   return n;
 }

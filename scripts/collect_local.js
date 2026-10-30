@@ -87,16 +87,18 @@ const normName  = s => String(s || "").replace(/\s*\[[^\]]*\]\s*$/, "").replace(
 
   // (2) owned(검색작+19금) 다운수 갱신
   const pnKind = {}; for (const n in extra.map) for (const e of extra.map[n]) pnKind[e.pn] = e.kind;
-  let refreshed = 0, newDl = 0;
+  let refreshed = 0, newDl = 0, stopSkip = 0, stopNew = 0;
   const owned = [...ownedSet];
   for (const pn of owned) {
+    if (C.stopSkip(sd[pn])) { stopSkip++; continue; }   // 판매중지로 확인된 상품은 30일간 스킵(그 뒤 재확인)
     const kind = pnKind[pn] || (sd[pn] && sd[pn].kind) || "comic";
     const before = sd[pn] && sd[pn].dl;
     const pd = await scrapeDetail(pn, kind);
     if (pd && pd.dl) { refreshed++; if (!before) newDl++; }
+    else if (sd[pn] && await C.isStopSale(pn, kind)) { sd[pn].stop = DATE; stopNew++; }
     await sleep(120);
   }
-  console.log(`owned 다운수 갱신: ${refreshed}/${owned.length}${COOKIE ? ` (신규 확보 ${newDl})` : ""}`);
+  console.log(`owned 다운수 갱신: ${refreshed}/${owned.length}${COOKIE ? ` (신규 확보 ${newDl})` : ""}${stopSkip || stopNew ? ` · 판매중지 스킵 ${stopSkip} · 새로 확인 ${stopNew}` : ""}`);
   console.log("시리즈 판본 연결:", JSON.stringify(C.refreshSeriesLinks(extra, sd, series, lookup.id || {}, det)));   // 웹툰↔시리즈 판본(회차수 기준) 다시 고름 → 프론트가 사용
 
   flush();

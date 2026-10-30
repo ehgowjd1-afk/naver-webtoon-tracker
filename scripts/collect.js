@@ -187,21 +187,33 @@ async function fetchVolumePrice(pn, kind){
     return null;
   }catch(e){ return null; }
 }
-/* 코믹 시리즈 단가(대여/소장 쿠키)를 없는 것부터 채움. 가격은 거의 안 변해 1회 수집으로 충분 → own 있으면 스킵. 성인은 제외(CDP). */
+/* 판매중지 상품: 상세 주소가 /error/stopSale.series로 넘어감(로그인 불필요, 성인작도 같음 — 2026-10-30 확인). 회차 목록이 비어 단가를 못 읽고 다운수도 안 나옴.
+   찾으면 series_details에 stop(확인일)을 남겨 단가·다운수 재시도에서 뺌. 판매 재개 대비 30일마다 다시 확인, 그 뒤 다운수를 다시 긁으면(at이 더 새로우면) 해제 */
+async function isStopSale(pn, kind){
+  try{ const r = await fetch(`https://series.naver.com/${kind||"comic"}/detail.series?productNo=${pn}`, { redirect:"manual", headers:{ "User-Agent":UA_PC, "Referer":"https://series.naver.com/" } }); return /\/error\/stopSale/.test(r.headers.get("location")||""); }catch(e){ return false; }
+}
+const STOP_RECHECK_DAYS = 30;
+function stopSkip(d){
+  if(!d || !d.stop || String(d.at||"") > String(d.stop)) return false;
+  return (Date.parse(runDate()) - Date.parse(d.stop)) / 864e5 < STOP_RECHECK_DAYS;
+}
+/* 코믹 시리즈 단가(대여/소장 쿠키)를 없는 것부터 채움. 가격은 거의 안 변해 1회 수집으로 충분 → own 있으면 스킵. 성인은 제외(CDP). 판매중지는 스킵 */
 async function fillVolumePrices(sd, extra, cap){
   cap = cap || 500;
   const adult = new Set(((extra&&extra.adult)||[]).map(String));
-  let n=0, got=0;
+  let n=0, got=0, stopped=0;
   for(const pn in sd){
     if(n>=cap) break;
     const d=sd[pn];
     if(!d || d.kind!=="comic" || !d.dl || d.own) continue;
-    if(adult.has(String(pn))) continue;
+    if(adult.has(String(pn)) || stopSkip(d)) continue;
     n++;
     const p = await fetchVolumePrice(pn, "comic");
     if(p){ d.rent=p.rent; d.own=p.own; got++; }
+    else if(await isStopSale(pn, "comic")){ d.stop=runDate(); stopped++; }
     await sleep(250);
   }
+  if(stopped) console.log("단가: 판매중지 " + stopped + "개 표시(30일간 스킵)");
   return got;
 }
 async function collectSeriesDetails(seriesData, existing){
@@ -669,6 +681,7 @@ function mergeDetail(old, pd, kind){ old=old||{}; const m={ g:pd.g||old.g||"", k
   const rent=(pd.rent!=null)?pd.rent:old.rent; if(rent!=null) m.rent=rent;   // 단가(대여/소장 쿠키) 보존 — 재수집 때 지우지 않음
   const own=(pd.own!=null)?pd.own:old.own; if(own!=null) m.own=own;
   const at = pd.dl ? runDate() : old.at; if(at) m.at=at;   // 다운수를 이번에 새로 긁었으면 "오늘 긁음" 스탬프 — updateRevenueHistory는 스탬프가 오늘인 작품만 기록
+  if(!pd.dl && old.stop) m.stop=old.stop;   // 판매중지 확인일 보존 — 다운수를 새로 긁었으면 판매 재개로 보고 지움
   return m; }
 // 시리즈 통합검색 결과 파싱 → [{pn, kind, title}]
 function parseSeriesSearch(html){
@@ -676,7 +689,7 @@ function parseSeriesSearch(html){
   let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
   return out;
 }
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateLaunchWeeks, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, episodeSplit, fillMissingTitles, pickSeriesHit, bestSeriesLink, refreshSeriesLinks, epFits, adultEp, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices, collectEpCounts, updateCmtHistory };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateLaunchWeeks, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, episodeSplit, fillMissingTitles, pickSeriesHit, bestSeriesLink, refreshSeriesLinks, epFits, adultEp, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices, isStopSale, stopSkip, collectEpCounts, updateCmtHistory };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();   // 랭킹·요일·장르 기록 날짜(기존 그대로)
   const hdate=runDate();   // 다운수·관심수·무료유료 히스토리 날짜(새벽 4시 전 실행이면 전날) — 수집 스탬프와 같은 값
