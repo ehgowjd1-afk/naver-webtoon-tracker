@@ -136,10 +136,12 @@ function updateHistory(tabs) {
           return list;
         };
         for (const so of SORTS) { const l = read(so); if (l) lists[so] = l; }
-        // 한 탭은 정렬만 다르고 작품은 같음 → 어느 정렬만 3개 넘게 짧으면(스크롤이 중간에 끊김) 한 번 더 읽어 긴 쪽을 씀.
-        // 2026-10-24 목요 인기순이 100에서 끊겨 101~114위가 빠짐(여성·남성은 114). 같은 탭 다른 정렬이 없으면 전에 받은 같은 목록 길이와 비교
+        // 한 탭은 정렬만 다르고 작품은 같음 → 어느 정렬만 3개 이상 짧으면(스크롤이 중간에 끊김) 한 번 더 읽어 긴 쪽을 씀.
+        // 2026-10-24 목요 인기순이 100에서 끊겨 101~114위가 빠짐(여성·남성은 114). 같은 탭 다른 정렬이 없을 때만 전에 받은 같은 목록 길이와 비교
+        // (정렬끼리 개수가 같으면 작품이 실제로 빠진 것 — 2026-10-31 월요 125→122는 세 정렬·다시 읽기 모두 122)
         if (key !== "all") for (const so of Object.keys(lists)) {
-          const want = Math.max(...Object.values(lists).map((l) => l.length), ((prev.tabs || {})[key + SORT_KEYS[so]] || []).length);
+          const lens = Object.values(lists).map((l) => l.length);
+          const want = lens.length > 1 ? Math.max(...lens) : Math.max(lens[0], ((prev.tabs || {})[key + SORT_KEYS[so]] || []).length);
           if (want - lists[so].length < 3) continue;
           log(`  [${label} · ${so}] ${lists[so].length}개로 짧음(기대 ${want}, 끝난 이유: ${ends[so]}) — 한 번 더 읽음`);
           const again = read(so);
