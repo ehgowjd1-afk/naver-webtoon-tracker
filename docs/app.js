@@ -1117,6 +1117,7 @@ function detailHtml(det, name, id){
   if(det.cp) info.push(["제작사", det.cp==="다중"?"여러 제작사":det.cp]);
   if(det.launch) info.push(["런칭일", det.launch]);
   const publish=[det.day,det.age].filter(Boolean).join(" · "); if(publish) info.push(["연재", publish]);
+  if(det.gone) info.push(["상태", "네이버웹툰에서 내려감 ("+det.gone+" 확인) · 수치는 내려가기 전 값"]);
   if(det.star) info.push(["평균 별점", "★ "+det.star]);
   if(det.cmt) info.push(["평균 댓글", det.cmt.toLocaleString()+"개"]);
   if(det.ep) info.push(["회차(총 N화)", det.ep+"화"]);

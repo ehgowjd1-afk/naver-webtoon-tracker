@@ -56,6 +56,9 @@ function mergeDetails(mine, rem) {
     if (!m) { mine[id] = r; n++; continue; }
     if (newer(r.favAt, m.favAt)) { m.fav = r.fav; m.favAt = r.favAt; n++; }
     if (newer(r.epAt, m.epAt)) { for (const f of ["ep", "epAt", "epGap", "free", "paid"]) if (r[f] !== undefined) m[f] = r[f]; n++; }
+    // 내려감 표시(gone)는 클라우드가 판단 — 내가 모르면 따라가고, 표시 뒤에 회차를 다시 읽었으면(epAt이 더 새로우면) 해제
+    if (r.gone && !m.gone && !newer(m.epAt, r.gone)) { m.gone = r.gone; m.adult = r.adult; n++; }
+    if (m.gone && !r.gone && newer(r.epAt, m.gone)) { delete m.gone; n++; }
   }
   return n;
 }

@@ -123,7 +123,7 @@ async function collectAll(page, opts = {}) {
 async function collectAdultCharge(page, opts = {}) {
   const { dmin = 1500, dmax = 3500, cap = Infinity } = opts;
   const det = readJSON("details.json", {});
-  let ids = Object.keys(det).filter(id => det[id] && det[id].adult === true);
+  let ids = Object.keys(det).filter(id => det[id] && det[id].adult === true && !det[id].gone);   // 네이버웹툰에서 내려간 작품은 회차 목록이 404라 제외(클라우드가 매일 확인해 돌아오면 해제)
   if (ids.length > cap) ids = ids.slice(0, cap);
   console.log("성인 웹툰 무료/유료 대상 " + ids.length + "개");
   try { await page.goto("https://comic.naver.com/", { waitUntil: "domcontentloaded", timeout: 30000 }); } catch (e) {}
