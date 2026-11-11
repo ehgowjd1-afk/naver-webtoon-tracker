@@ -50,6 +50,32 @@ async function fillMissingTitles(lists){
   }
   console.log("앱 랭킹 전용 작품(완결작 등) 이름 보충:", got, "/", miss.length);
 }
+/* 앱 장르 주간(폰·검색 위젯) 행은 id만 있고 표지는 lookup에서 가져오는데, lookup은 매일 PC 연재·장르 목록으로 새로 만들어
+   목록에서 빠진 완결작(예: 내 남편의 정부에게)은 사이트에서 표지 없이(🎬) 보였음(2026-11-11).
+   지난 lookup에 있던 건 이어 쓰고, 없을 때만 info API(로그아웃)로 2초 간격 채움 → 첫날만 요청, 다음 날부턴 이어 쓰기 */
+async function keepAppRankTitles(out, idMap, nameMap){
+  const ids = new Set(), dir = path.join(out, "app_genre");
+  try{
+    const idx = JSON.parse(fs.readFileSync(path.join(dir, "index.json"), "utf8"));
+    for(const wk of idx.weeks||[]){ try{ const f = JSON.parse(fs.readFileSync(path.join(dir, `${wk}.json`), "utf8")); for(const c in f.charts||{}) for(const r of f.charts[c]||[]) if(r && r.id!=null && !r.th) ids.add(String(r.id)); }catch(e){} }
+  }catch(e){}
+  let prev = {}; try{ prev = JSON.parse(fs.readFileSync(path.join(out, "lookup.json"), "utf8")).id || {}; }catch(e){}
+  let kept = 0, got = 0; const need = [];
+  for(const id of ids){
+    if(idMap[id] && idMap[id][1]) continue;
+    const p = prev[id];
+    if(p && p[0] && p[1]){ idMap[id] = p; if(!nameMap[p[0]]) nameMap[p[0]] = Number(id); kept++; }
+    else need.push(id);
+  }
+  for(const id of need){
+    try{
+      const d = await getJSON(`https://comic.naver.com/api/article/list/info?titleId=${id}`, `https://comic.naver.com/webtoon/list?titleId=${id}`);
+      if(d && d.titleName && d.thumbnailUrl){ idMap[id] = [d.titleName, d.thumbnailUrl, (d.communityArtists||[]).map(a=>a.name).filter(Boolean).join(" / ")]; if(!nameMap[d.titleName]) nameMap[d.titleName] = Number(id); got++; }
+    }catch(e){}
+    await sleep(2000);
+  }
+  return { ids: ids.size, kept, got, miss: need.length - got };
+}
 
 /* 앱(m.comic HTML): nclk_v2(event,'lst.list','id','rank') → {r,id} (제목 등은 프론트에서 lookup) */
 function parseMobile(html, startMarker){
@@ -690,7 +716,7 @@ function parseSeriesSearch(html){
   let m; while(m=re.exec(html)){ const kind=m[1], pn=Number(m[2]); const title=m[3].replace(/<[^>]*>/g,"").replace(/\s+/g," ").trim(); if(title) out.push({pn, kind, title}); }
   return out;
 }
-module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateLaunchWeeks, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, episodeSplit, fillMissingTitles, pickSeriesHit, bestSeriesLink, refreshSeriesLinks, epFits, adultEp, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices, isStopSale, stopSkip, collectEpCounts, updateCmtHistory };
+module.exports = { seriesAll, parseSeries, parseSeriesMobile, SERIES_CATS, collectPromo, parsePromo, parseSeriesDetail, collectSeriesDetails, searchLinkWebtoons, parseDlNum, updateRevenueHistory, updateLaunchWeeks, updateEpHistory, updateFavHistory, isoDate, runDate, dataDate, fullRunOK, readHistory, mergeDetail, episodeSplit, fillMissingTitles, keepAppRankTitles, pickSeriesHit, bestSeriesLink, refreshSeriesLinks, epFits, adultEp, parseSeriesSearch, probeEpByComments, fetchVolumePrice, fillVolumePrices, isStopSale, stopSkip, collectEpCounts, updateCmtHistory };
 if (require.main === module) (async ()=>{
   const updated=new Date().toISOString(), date=isoDate();   // 랭킹·요일·장르 기록 날짜(기존 그대로)
   const hdate=runDate();   // 다운수·관심수·무료유료 히스토리 날짜(새벽 4시 전 실행이면 전날) — 수집 스탬프와 같은 값
@@ -738,6 +764,7 @@ if (require.main === module) (async ()=>{
   } catch(e){ console.error("series details failed:", e.message); }
   try { const full = fullRunOK(collectSeriesDetails.stats);   // 본수집 정상 여부 = 이번 실행이 비성인 다운수를 절반 이상 실제로 긁었는지
     const rh = updateRevenueHistory(OUT, hdate, {full}); if(rh) console.log("revenue history:", JSON.stringify(rh), "full:", full, JSON.stringify(collectSeriesDetails.stats||null)); } catch(e){ console.error("revenue history failed:", e.message); }   // 오늘 긁은 작품만 기록 + 정상이면 완료 날짜(lastFull) 표시
+  try { console.log("앱 장르 주간 전용 작품(완결작 등) 표지:", JSON.stringify(await keepAppRankTitles(OUT, idL, nameL))); } catch(e){ console.error("app-rank titles failed:", e.message); }   // 덮어쓰기 전에 지난 lookup에서 이어 씀
   fs.writeFileSync(path.join(OUT,"lookup.json"), JSON.stringify({ id:idL, name:nameL }));
   fs.writeFileSync(path.join(OUT,"details.json"), JSON.stringify(details));
   try { const lw = updateLaunchWeeks(OUT, details, idL); if(lw) console.log("launch weeks(신작 론칭 주차):", JSON.stringify(lw)); } catch(e){ console.error("launch weeks failed:", e.message); }   // 사이트 '신작 월별' — 150일 넘어도 남게 따로 보관
