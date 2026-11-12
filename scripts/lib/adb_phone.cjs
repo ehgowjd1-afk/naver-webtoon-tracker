@@ -11,7 +11,7 @@ const norm = (s) => String(s || "").replace(/[\s\u200b·・:,.!?'"‘’“”~\
 
 const adb = (...a) => execFileSync(ADB, a, { encoding: "utf8", env: { ...process.env, MSYS_NO_PATHCONV: "1" }, maxBuffer: 64 * 1024 * 1024, timeout: 90000 });
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-const zw = (s) => String(s || "").replace(/\u200b/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#10;/g, " ");
+const zw = (s) => String(s || "").replace(/\u200b/g, "").replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#10;/g, " ").replace(/&#(\d+);/g, (m, n) => String.fromCodePoint(+n));   // 이모지 등(시리즈 앱 '&#127850;')
 const log = (...a) => console.log(new Date(Date.now() + 9 * 3600e3).toISOString().slice(11, 19), ...a);
 
 function nodesOf(xml) {

@@ -485,3 +485,15 @@ footer a:hover{text-decoration:underline}
 .slink:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
 .tile .big .slink{display:block}
 .ostat .otxt .slink{white-space:normal}
+
+/* 시리즈 앱 홈 배너·이벤트(캡처 카드) */
+ol.board.pgrid{display:grid; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); gap:12px}
+.pcard{background:var(--row); border:1px solid var(--border); border-radius:12px; overflow:hidden; display:flex; flex-direction:column}
+.pcard img{width:100%; height:auto; display:block; background:var(--thumb-bg)}
+.pimg-ph{aspect-ratio:4/3; display:grid; place-items:center; color:var(--faint); background:var(--thumb-bg); font-size:12px}
+.pmeta{padding:9px 12px 11px; display:flex; flex-direction:column; gap:3px; min-width:0}
+.pttl{font-weight:600; font-size:13.5px; display:flex; gap:7px; align-items:baseline; word-break:keep-all; overflow-wrap:anywhere}
+.pno{font-family:"Black Han Sans",sans-serif; color:var(--accent); font-size:15px; flex:none}
+.psub{font-size:12px; color:var(--muted)}
+.pdays{font-size:11.5px; color:var(--faint)}
+.pdays a{color:var(--accent)}
