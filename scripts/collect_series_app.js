@@ -5,8 +5,9 @@
  * 저장: docs/data/series_app.json = {date, updated, listDates{기간_장르:날짜}, rank{DAILY|WEEKLY|MONTHLY:{전체장르|순정|BL|드라마|소년|무협:[{r,t,m,b[],dl?,id?,th?}]}},
  *         strips{기간_장르:랭킹 위 띠 문구}, names{정규화 제목:{id,th}}}
  *       docs/data/series_app_history.json = {dates[], series{기간_장르:{정규화 제목:[순위…]}}, names{정규화 제목:제목}} (최근 60일)
- *       docs/data/series_app_promo.json = {date, banners{이름:{img,days[]}}, events{키:{t,sub,left,img,det,days[]}}, today{bdate,banners[],edate,events[]}}
- *       docs/data/series_app/ — b_*.jpg 홈 배너 · e_*.jpg 이벤트 칸 · ed_*.jpg 이벤트 눌렀을 때 첫 화면 · th_*.jpg 웹에서 표지를 못 구한 작품(성인 등) 표지
+ *       docs/data/series_app_promo.json = {date, banners{이름:{img,det,info,days[]}}, events{키:{t,sub,left,img,det,info,days[]}}, today{bdate,banners[],edate,events[]}}
+ *         info = 눌렀을 때 이벤트 화면 글자 {secs:[{h:구역 제목, works:[{t,b[]}]}], kv:{기간,미션,혜택,주의 사항,참고 사항…}}, det = 그 화면 첫 캡처(bd_/ed_)
+ *       docs/data/series_app/ — b_*.jpg 홈 배너 · bd_*.jpg 배너 눌렀을 때 첫 화면 · e_*.jpg 이벤트 칸 · ed_*.jpg 이벤트 눌렀을 때 첫 화면 · th_*.jpg 웹에서 표지를 못 구한 작품(성인 등) 표지
  * node scripts/collect_series_app.js [--push] [--only=rank,banner,event] [--force] [--dry]
  */
 const fs = require("fs"), path = require("path"), os = require("os"), crypto = require("crypto");
@@ -80,7 +81,8 @@ const flingTop = (n = 14) => { for (let i = 0; i < n; i++) swipe(540, 600, 540, 
 // 슬라이드 가운데 칸 View [43,353,1037,1115] desc = 배너 이름(운영용 이름: '정기_11/12 타임딜', '웹_요일_보스의노골적취향_드라마방영[스토리펀치,JA]' 등)
 // 옆 칸 '총 배너 15개 중 7번째 배너 표시 중'. 슬라이드는 5.4초마다 저절로 넘어가고, 손으로 밀면 그때부터 다시 5.3초(2026-11-12 잼)
 // → 밀고 0.7초 뒤 캡처, 그다음 화면 읽기(읽기 2.7초)까지 다음 자동 넘김 전에 끝나므로 캡처와 읽은 이름이 같은 배너
-function readBanners() {
+// 이벤트 내용(눌렀을 때 화면)을 아직 안 읽은 배너는 두 번째 바퀴에서 그 배너가 올 때까지 밀고, 읽은 직후(다음 자동 넘김 전) 눌러 readDetail
+function readBanners(prev) {
   bottomTab("홈"); topTab("추천"); flingTop(6);
   const isCen = (n) => n.cls === "View" && n.b.length && n.b[0] >= 20 && n.b[0] <= 80 && n.b[2] - n.b[0] > 800 && n.b[1] > 250 && n.b[1] < 500 && n.d && !/^총 배너/.test(n.d);
   const ind = (nodes) => { const x = nodes.find((n) => /^총 배너 \d+개 중 \d+번째/.test(n.d)); return x ? x.d.match(/^총 배너 (\d+)개 중 (\d+)번째/).slice(1).map(Number) : null; };
@@ -95,13 +97,75 @@ function readBanners() {
     got.set(I[1], { name: cen.d, img: f });
   }
   log(`  홈 배너 ${got.size}/${total}개`);
+  let nd = 0;
+  for (const target of [...got.keys()].sort((a, b) => a - b)) {
+    const b = got.get(target), p = (prev || {})[b.name];
+    if (p && p.info && !FORCE) { b.det = p.det || ""; b.info = p.info; continue; }
+    for (let k = 0; k < total + 3; k++) {
+      swipe(900, 730, 160, 730, 250); wait(700);
+      const nodes = dump(), I = ind(nodes), cen = nodes.find(isCen);
+      if (!I || !cen || I[1] !== target) continue;
+      if (cen.d !== b.name) break;   // 그사이 배너 순서가 바뀜 — 다음 날 다시
+      tap(cen.b); wait(4000);
+      const f = "bd_" + hash(b.name) + ".jpg", info = readDetail(f);
+      if (info) { b.info = info; b.det = has(f) ? f : ""; nd++; }
+      backToMain();
+      break;
+    }
+  }
+  if (nd) log(`  홈 배너 이벤트 내용 ${nd}개 새로 읽음`);
   return [...got.entries()].sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+}
+function backToMain() { P.back(); wait(2000); for (let k = 0; k < 2 && !/nbooks\/.*MainActivity/.test(P.focus()); k++) { P.back(); wait(2000); } }
+
+/* ── 이벤트 화면(배너·이벤트 칸을 눌렀을 때 EventDetailActivity) ─────────── */
+// 첫 화면 캡처(f) + 바닥 안내('사업자 정보')까지 내려가며 글자 읽기:
+//  작품 칸 Button desc '제목, [신작,] [새 회차 업데이트,] [매일10시무료 적용,] COMIX' → 구역 제목(바로 위 왼쪽 한 줄 글자) 아래로 묶음
+//  '꼭 확인해주세요' 아래 같은 줄 두 칸 = 기간·미션·혜택·주의 사항·참고 사항
+// (2026-11-13: 이벤트 페이지는 2~3화면 길이, 단일 작품 소개 칸은 TextView로만 나와 묶음에서 빠질 수 있음 — 캡처에는 보임)
+const KV = /^(기간|미션|혜택|주의 ?사항|참고 ?사항|유의 ?사항|대상|참여 ?방법|지급 ?일정)$/;
+function parseWork(d) {
+  const parts = d.split(", ").filter((x) => !/^(COMIX|NOVEL|EBOOK|E-BOOK)$/.test(x));
+  const k = parts.findIndex((p, i) => i > 0 && FLAG.test(p));
+  const t = (k < 0 ? parts : parts.slice(0, k)).join(", ");
+  return t ? { t, b: flagsOf(k < 0 ? [] : parts.slice(k)).b } : null;
+}
+function readDetail(f) {
+  if (/nbooks\/.*MainActivity/.test(P.focus())) return null;   // 안 열림
+  if (f && !has(f)) { shot(); crop([{ x: 0, y: 216, w: 1080, h: 1810, s: 0.4, f }]); }
+  const secs = [], kv = {}, seen = new Set(); let head = "";
+  for (let s = 0; s < 8; s++) {
+    const nodes = dump().filter((n) => n.b.length && n.b[1] > 200 && (n.t || n.d)).sort((a, b) => a.b[1] - b.b[1] || a.b[0] - b.b[0]);
+    let footer = false;
+    for (const n of nodes) {
+      const v = (n.t || n.d).trim();
+      if (/사업자 정보|©NAVER WEBTOON/.test(v)) { footer = true; break; }
+      if (n.cls === "Button" && /, (COMIX|NOVEL|EBOOK)$/.test(n.d)) {
+        const w = parseWork(n.d); if (!w || seen.has("w:" + w.t)) continue;
+        seen.add("w:" + w.t);
+        let sec = secs[secs.length - 1]; if (!sec || sec.h !== head) secs.push(sec = { h: head, works: [] });
+        sec.works.push(w); continue;
+      }
+      if (n.cls !== "TextView" || !n.t) continue;
+      if (KV.test(v)) {   // 같은 줄 오른쪽 칸이 값
+        const val = nodes.find((m) => m !== n && m.cls === "TextView" && m.t && Math.abs(m.b[1] - n.b[1]) < 15 && m.b[0] >= n.b[2] - 5);
+        const key = v.replace(/\s+/g, " ");
+        if (val && !kv[key]) { kv[key] = val.t.trim(); seen.add("v:" + val.t.trim()); }
+        continue;
+      }
+      if (v === "꼭 확인해주세요" || seen.has("v:" + v)) continue;
+      if (n.b[0] < 90 && v.length <= 40) head = v;   // 왼쪽에서 시작하는 짧은 한 줄 = 구역 제목 후보(작품이 뒤따를 때만 남음)
+    }
+    if (footer) break;
+    swipe(540, 1800, 540, 600, 600); wait(1200);
+  }
+  return { secs: secs.filter((x) => x.works.length), kv };
 }
 
 /* ── 이벤트 탭 ───────────────────────────────────────── */
 // 칸 = 가로 전체 Button(높이 ~336), 안의 TextView: 제목 · 부제 · (저작권 줄) · 남은 기간('7일 남음'·'오늘 마감')
-// 처음 본 이벤트는 칸 이미지 + 눌렀을 때 첫 화면(ed_)도 저장
-function readEvents() {
+// 처음 본 이벤트는 칸 이미지, 내용을 아직 안 읽은 이벤트는 눌러서 첫 화면(ed_)·글자(readDetail)
+function readEvents(prev) {
   bottomTab("이벤트");
   tapText("전체", (n) => n.b[1] > 200 && n.b[1] < 360);
   flingTop(8);
@@ -120,28 +184,30 @@ function readEvents() {
       if (!t) continue;
       const key = t + " | " + sub;
       const full = c.b[3] <= 2028 && c.b[1] >= 400;
-      if (!got.has(key)) got.set(key, { key, t, sub, left, img: "", det: "" });
+      if (!got.has(key)) { const p = (prev || {})[key]; got.set(key, { key, t, sub, left, img: "", det: (p && p.det) || "", info: !FORCE && p && p.info ? p.info : null, tried: false }); }
       const e = got.get(key);
       if (!e.img && full) {
         e.img = "e_" + hash(key) + ".jpg";
-        if (!has(e.img)) { jobs.push({ x: 42, y: c.b[1], w: 996, h: Math.max(100, c.b[3] - c.b[1] - 22), s: 0.5, f: e.img }); fresh.push([e, c]); }
+        if (!has(e.img)) jobs.push({ x: 42, y: c.b[1], w: 996, h: Math.max(100, c.b[3] - c.b[1] - 22), s: 0.5, f: e.img });
       }
+      if (!e.info && !e.tried && full) fresh.push([e, c]);
     }
     if (jobs.length) { shot(); crop(jobs); }
-    // 처음 본 이벤트: 눌러서 첫 화면 저장 → 뒤로
+    // 내용 안 읽은 이벤트: 눌러서 첫 화면·글자 → 뒤로(목록 위치는 그대로)
     for (const [e, c] of fresh) {
+      e.tried = true;
       const f = "ed_" + hash(e.key) + ".jpg";
-      if (has(f)) { e.det = f; continue; }
       tap([c.b[0], c.b[1], c.b[2], c.b[1] + 200]); wait(4000);
-      if (!/MainActivity/.test(P.focus())) { shot(); crop([{ x: 0, y: 216, w: 1080, h: 1810, s: 0.4, f }]); e.det = f; }
-      P.back(); wait(2000);
-      if (!/nbooks\/.*MainActivity/.test(P.focus())) { P.back(); wait(2000); }
+      const info = readDetail(f);
+      if (info) e.info = info;
+      if (has(f)) e.det = f;
+      backToMain();
     }
     if (got.size === before) stale++; else stale = 0;
     swipe(540, 1750, 540, 750, 600); wait(1200);
   }
-  for (const e of got.values()) { if (!e.det && has("ed_" + hash(e.key) + ".jpg")) e.det = "ed_" + hash(e.key) + ".jpg"; if (!e.img && has("e_" + hash(e.key) + ".jpg")) e.img = "e_" + hash(e.key) + ".jpg"; }
-  log(`  이벤트 ${got.size}개`);
+  for (const e of got.values()) { if (!e.det && has("ed_" + hash(e.key) + ".jpg")) e.det = "ed_" + hash(e.key) + ".jpg"; if (!e.img && has("e_" + hash(e.key) + ".jpg")) e.img = "e_" + hash(e.key) + ".jpg"; delete e.tried; }
+  log(`  이벤트 ${got.size}개 · 내용 읽음 ${[...got.values()].filter((e) => e.info).length}개`);
   return [...got.values()];
 }
 
@@ -155,7 +221,13 @@ function parseCard(d) {
   if (k < 0) return null;
   const fl = parts.slice(k), rk = fl.find((x) => /^\d+위$/.test(x));
   if (!rk) return null;
-  const row = { r: parseInt(rk, 10), t: parts.slice(0, k).join(", "), m: 0, b: [] };
+  const f = flagsOf(fl), row = { r: parseInt(rk, 10), t: parts.slice(0, k).join(", "), m: f.m, b: f.b };
+  if (f.dl) row.dl = f.dl;
+  return row;
+}
+// 표시 칸 → {m(순위 변동), b[](뱃지), dl(다운로드 수)} — 랭킹 칸·이벤트 화면 작품 칸 공통
+function flagsOf(fl) {
+  const row = { m: 0, b: [] };
   for (const x of fl) {
     let m;
     if ((m = x.match(/^(\d+)단계 (상승|하락)$/))) row.m = m[2] === "상승" ? +m[1] : -m[1];
@@ -271,8 +343,8 @@ function updateHistory(rank) {
   let R = null, banners = null, events = null;
   try {
     openApp();
-    if (ONLY.includes("banner") && (FORCE || promo.today.bdate !== TODAY)) { try { banners = readBanners(); } catch (e) { log("  홈 배너 실패:", e.message); } }
-    if (ONLY.includes("event") && (FORCE || promo.today.edate !== TODAY)) { try { events = readEvents(); } catch (e) { log("  이벤트 실패:", e.message); } }
+    if (ONLY.includes("banner") && (FORCE || promo.today.bdate !== TODAY)) { try { banners = readBanners(promo.banners); } catch (e) { log("  홈 배너 실패:", e.message); } }
+    if (ONLY.includes("event") && (FORCE || promo.today.edate !== TODAY)) { try { events = readEvents(promo.events); } catch (e) { log("  이벤트 실패:", e.message); } }
     if (ONLY.includes("rank") && (FORCE || !allRank)) { try { R = readRanking(prev, idx); } catch (e) { log("  랭킹 실패:", e.message); } }
   } catch (e) { log("실패:", e.message); }
   finally { try { adb("shell", "am", "force-stop", SPKG); } catch (e) {} P.finish(); }
@@ -281,11 +353,11 @@ function updateHistory(rank) {
   // 배너·이벤트: 날짜별 노출 기록
   if ((banners && banners.length) || (events && events.length)) {
     if (banners && banners.length) {
-      for (const b of banners) { const e = promo.banners[b.name] || (promo.banners[b.name] = { img: b.img, days: [] }); if (!e.days.includes(TODAY)) e.days.push(TODAY); if (!e.img) e.img = b.img; }
+      for (const b of banners) { const e = promo.banners[b.name] || (promo.banners[b.name] = { img: b.img, days: [] }); if (!e.days.includes(TODAY)) e.days.push(TODAY); if (!e.img) e.img = b.img; if (b.det) e.det = b.det; if (b.info) e.info = b.info; }
       promo.today.bdate = TODAY; promo.today.banners = banners.map((b) => b.name);
     }
     if (events && events.length) {
-      for (const v of events) { const e = promo.events[v.key] || (promo.events[v.key] = { t: v.t, sub: v.sub, days: [] }); e.left = v.left; if (v.img) e.img = v.img; if (v.det) e.det = v.det; if (!e.days.includes(TODAY)) e.days.push(TODAY); }
+      for (const v of events) { const e = promo.events[v.key] || (promo.events[v.key] = { t: v.t, sub: v.sub, days: [] }); e.left = v.left; if (v.img) e.img = v.img; if (v.det) e.det = v.det; if (v.info) e.info = v.info; if (!e.days.includes(TODAY)) e.days.push(TODAY); }
       promo.today.edate = TODAY; promo.today.events = events.map((v) => v.key);
     }
     promo.date = TODAY; promo.updated = new Date().toISOString();

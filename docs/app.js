@@ -662,6 +662,7 @@ function selectSrc(k){
   if(k==="weekday" && !APPWD){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureAppWd().then(()=>{ if(src==="weekday"){ renderSubnav(); renderView(); } }); return; }
   if(k==="appgenre" && !AGEN){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureAgen().then(()=>{ if(src!=="appgenre") return; document.getElementById("gwsel").style.display=(AGEN_IDX&&AGEN_IDX.weeks.length>1)?"":"none"; renderSubnav(); renderView(); }); return; }
   if(k==="promo" && !PROMO){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensurePromo().then(()=>renderView()); return; }
+  if(k==="sapromo") ensureSeries();   // 이벤트 창의 작품 → 시리즈 상품번호(없으면 검색 링크)
   if(k==="sapromo" && !SAPROMO){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureSAPromo().then(()=>{ if(src==="sapromo") renderView(); }); return; }
   if((k==="revenue"||k==="newworks"||k==="revchange"||k==="done") && (!SERIES||!SERIESDET||!DETAILS||((k==="revchange"||k==="newworks")&&!REVHIST))){ document.getElementById("board").innerHTML=`<li class="empty">${k==="newworks"?"신작":k==="revchange"?"매출 변동":k==="done"?"완결":"매출"} 데이터 불러오는 중…</li>`; Promise.all([ensureSeries(),ensureSeriesDetails(),ensureDetails(),ensureRevHist()]).then(()=>{ SNAMEIDX=null; renderView(); }); return; }
   if(k==="series") setupSeriesCtl();
@@ -1085,27 +1086,52 @@ function renderList(){
     </li>`;
   }).join("");
 }
-/* 시리즈 앱 홈 배너·이벤트 카드: 캡처 이미지 + 이름 + 노출 기간(수집한 날 중 처음~마지막). 이벤트는 눌렀을 때 첫 화면(det) 링크 */
+/* 시리즈 앱 홈 배너·이벤트 카드: 캡처 이미지 + 이름 + 노출 기간(수집한 날 중 처음~마지막). 누르면 이벤트 창(openPromoModal) */
+const promoImg=f=>`data/series_app/${encodeURIComponent(f)}`;
+const leftLabel=l=>{ const n=+((String(l).match(/^(\d+)일 남음$/)||[])[1]||0); return n>3650?"상시":l; };   // 끝없는 이벤트는 앱에 '26712일 남음'처럼 나옴
+const promoSpan=e=>{ const days=(e.days||[]).slice().sort(), first=days[0], last=days[days.length-1]; return `${first===last?dot(first):`${dot(first)} ~ ${dot(last)}`} · ${days.length}일`; };
 function renderPromoImg(){
   const P=SAPROMO||{banners:{},events:{},today:{}}, ban=variant==="banner", all=(ban?P.banners:P.events)||{};
   const nowKeys=((ban?P.today.banners:P.today.events)||[]).filter(k=>all[k]), nowSet=new Set(nowKeys);
   const lastDay=e=>(e.days||[]).slice().sort().pop()||"";
   let keys = sub==="now" ? nowKeys : Object.keys(all).filter(k=>!nowSet.has(k)).sort((a,b)=>lastDay(all[b]).localeCompare(lastDay(all[a])));
-  if(query) keys=keys.filter(k=>(k+" "+(all[k].t||"")+" "+(all[k].sub||"")).toLowerCase().includes(query));
-  const img=f=>`data/series_app/${encodeURIComponent(f)}`;
-  const leftLabel=l=>{ const n=+((String(l).match(/^(\d+)일 남음$/)||[])[1]||0); return n>3650?"상시":l; };   // 끝없는 이벤트는 앱에 '26712일 남음'처럼 나옴
-  document.getElementById("count").innerHTML=`${keys.length}개 ${ban?"배너":"이벤트"}`+(ban&&sub==="now"?` · <span style="color:var(--faint)">앱 슬라이드 순서</span>`:"");
+  if(query) keys=keys.filter(k=>{ const e=all[k], ws=e.info?e.info.secs.flatMap(s=>s.works.map(w=>w.t)).join(" "):""; return (k+" "+(e.t||"")+" "+(e.sub||"")+" "+ws).toLowerCase().includes(query); });   // 이벤트 대상 작품 이름으로도 찾음
+  document.getElementById("count").innerHTML=`${keys.length}개 ${ban?"배너":"이벤트"}`+(ban&&sub==="now"?` · <span style="color:var(--faint)">앱 슬라이드 순서</span>`:"")+` · <span style="color:var(--faint)">누르면 이벤트 내용</span>`;
   const board=document.getElementById("board");
   board.innerHTML = keys.map((k,i)=>{
-    const e=all[k], days=(e.days||[]).slice().sort(), first=days[0], last=days[days.length-1];
-    const span = first===last ? dot(first) : `${dot(first)} ~ ${dot(last)}`;
-    const title = ban ? k : (e.t||k);
-    const pic = e.img ? `<img loading="lazy" src="${img(e.img)}" alt="${esc(title)}">` : `<div class="pimg-ph">이미지 없음</div>`;
-    return `<li class="pcard">${e.det?`<a href="${img(e.det)}" target="_blank" rel="noopener" title="눌렀을 때 첫 화면 보기">${pic}</a>`:pic}
+    const e=all[k], title = ban ? k : (e.t||k), kv=(e.info&&e.info.kv)||{};
+    const pic = e.img ? `<img loading="lazy" src="${promoImg(e.img)}" alt="${esc(title)}">` : `<div class="pimg-ph">이미지 없음</div>`;
+    return `<li class="pcard" role="button" tabindex="0" data-pk="${esc(k)}">${pic}
       <div class="pmeta"><div class="pttl">${ban&&sub==="now"?`<span class="pno">${i+1}</span>`:""}<span>${esc(title)}</span></div>
       ${!ban&&e.sub?`<div class="psub">${esc(e.sub)}</div>`:""}
-      <div class="pdays">${!ban&&sub==="now"&&e.left?`<span class="badge b-deadline">${esc(leftLabel(e.left))}</span> `:""}노출 ${span} · ${days.length}일${e.det?` · <a href="${img(e.det)}" target="_blank" rel="noopener">이벤트 화면</a>`:""}</div></div></li>`;
+      ${kv["혜택"]?`<div class="psub">🎁 ${esc(kv["혜택"])}</div>`:""}
+      <div class="pdays">${!ban&&sub==="now"&&e.left?`<span class="badge b-deadline">${esc(leftLabel(e.left))}</span> `:""}${kv["기간"]?`기간 ${esc(kv["기간"])} · `:""}노출 ${promoSpan(e)}</div></div></li>`;
   }).join("") || `<li class="empty">${sub==="now"?"오늘 받은 목록이 없어요":"아직 지난 것이 없어요 — 매일 쌓이면 여기에 보여요"}</li>`;
+  board.onclick=e=>{ const c=e.target.closest("[data-pk]"); if(c) openPromoModal(c.dataset.pk); };
+  board.onkeydown=e=>{ const c=e.target.closest("[data-pk]"); if(c&&(e.key==="Enter"||e.key===" ")){ e.preventDefault(); openPromoModal(c.dataset.pk); } };
+}
+/* 이벤트 창: 배너(또는 이벤트 칸) 이미지 · 눌렀을 때 첫 화면 캡처 · 기간/미션/혜택 · 구역별 대상 작품(시리즈 상품 링크) */
+function openPromoModal(k){
+  const P=SAPROMO||{banners:{},events:{}}, ban=variant==="banner", e=((ban?P.banners:P.events)||{})[k]; if(!e) return;
+  const info=e.info||{secs:[],kv:{}}, title=ban?k:(e.t||k);
+  const nm=t=>String(t||"").replace(/\s+/g,"").toLowerCase();
+  const idOf=t=>{ const x=SAPP&&SAPP.names&&SAPP.names[nm(t)]; if(x&&x.id) return x.id; const c=SERIES?(seriesNameIndex()[normName(t)]||[]).find(y=>y.kind==="comic"):null; return c?c.pn:0; };
+  const wurl=t=>{ const id=idOf(t); return id?`https://series.naver.com/comic/detail.series?productNo=${id}`:`https://series.naver.com/search/search.series?t=all&fs=comic&q=${encodeURIComponent(t)}`; };
+  const KVO=["기간","미션","혜택"], kvo=k=>{ const i=KVO.indexOf(k); return i<0?9:i; };   // 기간·미션·혜택 먼저, 주의·참고 사항은 뒤
+  const kvh=Object.entries(info.kv||{}).sort((x,y)=>kvo(x[0])-kvo(y[0])).map(([a,b])=>`<dt>${esc(a)}</dt><dd>${esc(b)}</dd>`).join("");
+  const secs=(info.secs||[]).map(s=>`<div class="pm-sec">${s.h?`<div class="pm-h">${esc(s.h)}</div>`:""}<ul class="pm-works">${s.works.map(w=>`<li><a href="${wurl(w.t)}" target="_blank" rel="noopener">${esc(w.t)}</a>${badgeHtml({b:w.b||[],s:0,r:0,id:null})}</li>`).join("")}</ul></div>`).join("");
+  const body=`<div class="pm">
+    <div class="pm-pics">${e.img?`<img src="${promoImg(e.img)}" alt="">`:""}${e.det?`<a href="${promoImg(e.det)}" target="_blank" rel="noopener" title="크게 보기"><img src="${promoImg(e.det)}" alt="이벤트 화면"></a>`:""}</div>
+    <div class="pm-info">
+      <div class="mrank">시리즈 앱 · ${ban?"홈 배너":"이벤트"}</div>
+      <h3 class="mtitle" id="mTitle">${esc(title)}</h3>${!ban&&e.sub?`<div class="psub">${esc(e.sub)}</div>`:""}
+      <div class="pdays">노출 ${promoSpan(e)}${!ban&&e.left?` · 앱 표시 ${esc(leftLabel(e.left))}`:""}</div>
+      ${kvh?`<dl class="pm-kv">${kvh}</dl>`:""}
+      ${secs||`<p class="pdays">${e.info?(kvh?"":"글자로 된 내용이 없는 이벤트예요 — 화면 캡처를 보세요"):"이벤트 내용은 다음 수집 때 채워져요"}</p>`}
+    </div></div>`;
+  document.querySelector(".modal-card").classList.add("wide");
+  document.getElementById("modalBody").innerHTML=body;
+  document.getElementById("modal").hidden=false;
 }
 function revHtml(d){
   const r=revenueFor(d.name);
