@@ -1,14 +1,15 @@
 /* 네이버 시리즈 앱(com.nhn.android.nbooks, 코믹스) 화면을 USB 폰으로 읽기 — 사이트 '시리즈 › 앱' 순위 · '앱 배너·이벤트'.
  *  - 랭킹: 일간·주간·월간 × 전체·순정·BL·드라마·소년·무협, 각 100위. 앱 랭킹은 웹(series.naver.com)·모바일웹과 순위가 다름
  *    (2026-11-12 일간: 앱 재혼 황후·화산귀환·울어 봐 빌어도 좋고… / 웹 화산귀환·별을 품은 소드마스터·일렉시드…) → 폰으로만 얻음.
+ *  - 연령별랭킹: 10~50대 × 여성·남성 10개, 각 100위(하루 1번 갱신 — 앱 표시).
  *  - 홈 배너(추천 탭 맨 위 슬라이드, 보통 15개)·이벤트 탭 목록: 앱에서만 나옴 → 화면을 잘라 이미지로 저장(처음 본 것만), 날마다 노출 여부를 쌓아 기간을 봄.
- * 저장: docs/data/series_app.json = {date, updated, listDates{기간_장르:날짜}, rank{DAILY|WEEKLY|MONTHLY:{전체장르|순정|BL|드라마|소년|무협:[{r,t,m,b[],dl?,id?,th?}]}},
- *         strips{기간_장르:랭킹 위 띠 문구}, names{정규화 제목:{id,th}}}
- *       docs/data/series_app_history.json = {dates[], series{기간_장르:{정규화 제목:[순위…]}}, names{정규화 제목:제목}} (최근 60일)
+ * 저장: docs/data/series_app.json = {date, updated, listDates{기간_장르:날짜}, rank{DAILY|WEEKLY|MONTHLY:{전체장르|순정|BL|드라마|소년|무협:[{r,t,m,b[],dl?,id?,th?}]}}, age{'10대 여성'…'50대 남성':[같은 꼴]},
+ *         strips{기간_장르|AGE_연령:랭킹 위 띠 문구}, names{정규화 제목:{id,th}}}
+ *       docs/data/series_app_history.json = {dates[], series{기간_장르|AGE_연령:{정규화 제목:[순위…]}}, names{정규화 제목:제목}} (최근 60일)
  *       docs/data/series_app_promo.json = {date, banners{이름:{img,det,info,days[]}}, events{키:{t,sub,left,img,det,info,days[]}}, today{bdate,banners[],edate,events[]}}
  *         info = 눌렀을 때 이벤트 화면 글자 {secs:[{h:구역 제목, works:[{t,b[]}]}], kv:{기간,미션,혜택,주의 사항,참고 사항…}}, det = 그 화면 첫 캡처(bd_/ed_)
  *       docs/data/series_app/ — b_*.jpg 홈 배너 · bd_*.jpg 배너 눌렀을 때 첫 화면 · e_*.jpg 이벤트 칸 · ed_*.jpg 이벤트 눌렀을 때 첫 화면 · th_*.jpg 웹에서 표지를 못 구한 작품(성인 등) 표지
- * node scripts/collect_series_app.js [--push] [--only=rank,banner,event] [--force] [--dry]
+ * node scripts/collect_series_app.js [--push] [--only=rank,age,banner,event] [--force] [--dry]
  */
 const fs = require("fs"), path = require("path"), os = require("os"), crypto = require("crypto");
 const { execFileSync } = require("child_process");
@@ -21,10 +22,11 @@ const IMG = path.join(OUT, "series_app");
 const SPKG = "com.nhn.android.nbooks";
 const args = process.argv.slice(2);
 const PUSH = args.includes("--push"), FORCE = args.includes("--force"), DRY = args.includes("--dry");
-const ONLY = ((args.find((a) => a.startsWith("--only=")) || "").split("=")[1] || "rank,banner,event").split(",");
+const ONLY = ((args.find((a) => a.startsWith("--only=")) || "").split("=")[1] || "rank,age,banner,event").split(",");
 const TODAY = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
 const PERIODS = [["DAILY", "일간"], ["WEEKLY", "주간"], ["MONTHLY", "월간"]];
 const GENRES = [["전체장르", "전체"], ["순정", "순정"], ["BL", "BL"], ["드라마", "드라마"], ["소년", "소년"], ["무협", "무협"]];
+const AGES = ["10대 여성", "20대 여성", "30대 여성", "40대 여성", "50대 여성", "10대 남성", "20대 남성", "30대 남성", "40대 남성", "50대 남성"];
 const TOPN = 100;
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36";
 const readJSON = (f, d) => { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch (e) { return d; } };
@@ -263,35 +265,65 @@ function scrapeRank(needTh) {
   }
   return { list: [...got.values()].sort((a, b) => a.r - b.r), strip };
 }
-function readRanking(prev, idx) {
-  bottomTab("홈"); topTab("랭킹");
-  const rank = {}, strips = {}, dates = {};
-  // 표지 없는 작품(웹 순위·검색에 없거나 성인 표지 가림) — 이미 잘라 둔 것 빼고
+// 목록 하나 읽기: 고르고(select) 맨 위로 → 앞 목록과 머리 6칸이 같으면(아직 안 바뀜) 한 번 더 고름 → 100위까지
+// st = {lastHead, th: 표지 자를 작품(웹 이름표에 표지 없는 것)}
+function thState(prev, idx) {
   const needTh = new Set(); const want = (t) => { const k = norm(t); if (!(idx[k] && idx[k].th) && !has("th_" + hash(k) + ".jpg")) needTh.add(k); };
   for (const p in prev.rank || {}) for (const g in prev.rank[p]) for (const x of prev.rank[p][g]) want(x.t);
-  let lastHead = "";
+  for (const a in prev.age || {}) for (const x of prev.age[a]) want(x.t);
+  // 처음 보는 작품도 표지 후보
+  return { lastHead: "", th: { has: (k) => needTh.has(k) || (!(idx[k] && idx[k].th) && !has("th_" + hash(k) + ".jpg")), delete: (k) => needTh.delete(k) } };
+}
+function readList(name, select, st) {
+  select(); flingTop();
+  const head = () => dump().filter((n) => n.cls === "Button" && /, \d+위(, |$)/.test(n.d)).slice(0, 6).map((n) => n.d).join("|");
+  let h = head();
+  if (h && h === st.lastHead) { wait(2500); h = head(); if (h === st.lastHead) { select(); flingTop(); h = head(); } }
+  if (h && h === st.lastHead) { log(`  [${name}] 앞 목록과 같음 — 바뀌지 않은 듯해서 건너뜀`); return null; }
+  st.lastHead = h;
+  const r = scrapeRank(st.th);
+  if (r.list.length < 10) { log(`  [${name}] ${r.list.length}개 — 버림`); return null; }
+  const miss = []; for (let k = 1; k <= Math.min(TOPN, r.list[r.list.length - 1].r); k++) if (!r.list.some((x) => x.r === k)) miss.push(k);
+  log(`  [${name}] ${r.list.length}개${miss.length ? " · 빠진 순위 " + miss.join(",") : ""} · 1~3위 ${r.list.slice(0, 3).map((x) => x.t).join(", ")}`);
+  return r;
+}
+function readRanking(st) {
+  bottomTab("홈"); topTab("랭킹");
+  const rank = {}, strips = {}, dates = {};
   for (const [pk, pl] of PERIODS) {
     rank[pk] = {};
     for (const [gk, gl] of GENRES) {
       try {
-        tapText(gl, (n) => n.b[1] > 330 && n.b[1] < 470);   // 장르 칩(위에 붙어 있음)
-        tapText(pl, (n) => n.b[1] > 1800);                  // 기간 띠(아래 떠 있음)
-        flingTop();
-        const head = () => dump().filter((n) => n.cls === "Button" && /, \d+위(, |$)/.test(n.d)).slice(0, 6).map((n) => n.d).join("|");
-        let h = head();
-        if (h && h === lastHead) { wait(2500); h = head(); if (h === lastHead) { tapText(gl, (n) => n.b[1] > 330 && n.b[1] < 470); tapText(pl, (n) => n.b[1] > 1800); flingTop(); h = head(); } }
-        if (h && h === lastHead) { log(`  [${pl} · ${gl}] 앞 목록과 같음 — 바뀌지 않은 듯해서 건너뜀`); continue; }
-        lastHead = h;
-        // 처음 보는 작품도 표지 후보(웹 이름표에 표지 없는 것)
-        const r = scrapeRank({ has: (k) => needTh.has(k) || (!(idx[k] && idx[k].th) && !has("th_" + hash(k) + ".jpg")), delete: (k) => needTh.delete(k) });
-        if (r.list.length < 10) { log(`  [${pl} · ${gl}] ${r.list.length}개 — 버림`); continue; }
-        rank[pk][gk] = r.list; strips[pk + "_" + gk] = r.strip; dates[pk + "_" + gk] = TODAY;
-        const miss = []; for (let k = 1; k <= Math.min(TOPN, r.list[r.list.length - 1].r); k++) if (!r.list.some((x) => x.r === k)) miss.push(k);
-        log(`  [${pl} · ${gl}] ${r.list.length}개${miss.length ? " · 빠진 순위 " + miss.join(",") : ""} · 1~3위 ${r.list.slice(0, 3).map((x) => x.t).join(", ")}`);
+        const r = readList(`${pl} · ${gl}`, () => { tapText(gl, (n) => n.b[1] > 330 && n.b[1] < 470); tapText(pl, (n) => n.b[1] > 1800); }, st);   // 장르 칩(위에 붙음) · 기간 띠(아래 떠 있음)
+        if (r) { rank[pk][gk] = r.list; strips[pk + "_" + gk] = r.strip; dates[pk + "_" + gk] = TODAY; }
       } catch (e) { log(`  [${pl} · ${gl}] 실패: ${e.message}`); }
     }
   }
   return { rank, strips, dates };
+}
+// 연령별랭킹 탭: 칩 '10대 여성'…'50대 남성'(기간 띠 없음, 하루 1번 갱신). 칩 줄을 가로로 밀면 위 탭 페이지가 넘어가 버림
+// → 원하는 칩이 안 보이면 보이는 끝 칩을 눌러 줄을 넘김(누른 칩이 가운데로 옴)
+function selectAge(label) {
+  const want = AGES.indexOf(label), sp = (t) => t.replace(/ /g, " ");   // 칩 글자의 띄어쓰기는 줄바꿈 없는 공백(U+00A0)
+  for (let k = 0; k < 6; k++) {
+    const cs = dump().filter((n) => n.cls === "TextView" && AGES.includes(sp(n.t)) && n.b.length && n.b[1] > 340 && n.b[1] < 450 && n.b[2] > n.b[0]).map((n) => ({ ...n, t: sp(n.t) }));
+    const hit = cs.find((c) => c.t === label);
+    if (hit) { tap(hit.b); wait(2500); return; }   // 화면 끝에 몇 픽셀만 걸친 칩도 그 부분을 누르면 골라짐
+    const wide = cs.filter((c) => c.b[2] - c.b[0] > 60); if (!wide.length) break;
+    tap((want > Math.max(...wide.map((c) => AGES.indexOf(c.t))) ? wide[wide.length - 1] : wide[0]).b); wait(2000);
+  }
+  throw new Error(`'${label}' 칩을 못 찾음`);
+}
+function readAge(st) {
+  bottomTab("홈"); topTab("연령별랭킹");
+  const age = {}, strips = {}, dates = {};
+  for (const label of [AGES[1], AGES[0], ...AGES.slice(2)]) {   // 열면 20대 여성이 골라져 있음 → 10대 여성은 둘째로(못 골랐으면 앞 목록과 같아 걸러짐)
+    try {
+      const r = readList("연령 " + label, () => selectAge(label), st);
+      if (r) { age[label] = r.list; strips["AGE_" + label] = r.strip; dates["AGE_" + label] = TODAY; }
+    } catch (e) { log(`  [연령 ${label}] 실패: ${e.message}`); }
+  }
+  return { age, strips, dates };
 }
 
 /* 제목 → 시리즈 상품번호·표지: 클라우드가 받는 웹·모바일웹 순위(series.json) → 지난번 이름표 → 시리즈 검색(제목 완전 일치) */
@@ -317,14 +349,14 @@ async function searchSeries(title) {
   } catch (e) { return null; }
 }
 
-function updateHistory(rank) {
+function updateHistory(lists) {   // {기간_장르|AGE_연령: [{r,t}]}
   const h = readJSON(F_HIST, { dates: [], series: {}, names: {} });
   let di = h.dates.indexOf(TODAY);
   if (di < 0) { h.dates.push(TODAY); di = h.dates.length - 1; for (const k in h.series) for (const t in h.series[k]) h.series[k][t].push(null); }
-  for (const p in rank) for (const g in rank[p]) {
-    const S = h.series[p + "_" + g] || (h.series[p + "_" + g] = {});
+  for (const key in lists) {
+    const S = h.series[key] || (h.series[key] = {});
     for (const t in S) S[t][di] = null;   // 오늘 다시 받은 목록은 오늘 칸을 새로 씀
-    for (const x of rank[p][g]) { const k = norm(x.t); const a = S[k] || (S[k] = Array(h.dates.length).fill(null)); a[di] = x.r; h.names[k] = x.t; }
+    for (const x of lists[key]) { const k = norm(x.t); const a = S[k] || (S[k] = Array(h.dates.length).fill(null)); a[di] = x.r; h.names[k] = x.t; }
   }
   const keep = 60; if (h.dates.length > keep) { const cut = h.dates.length - keep; h.dates = h.dates.slice(cut); for (const k in h.series) for (const t in h.series[k]) { h.series[k][t] = h.series[k][t].slice(cut); if (h.series[k][t].every((v) => v == null)) delete h.series[k][t]; } }
   if (!DRY) fs.writeFileSync(F_HIST, JSON.stringify(h));
@@ -336,16 +368,19 @@ function updateHistory(rank) {
   const prev = readJSON(F_RANK, { rank: {}, listDates: {}, names: {}, strips: {} });
   const promo = readJSON(F_PROMO, { banners: {}, events: {}, today: {} });
   const allRank = PERIODS.every(([p]) => GENRES.every(([g]) => (prev.listDates || {})[p + "_" + g] === TODAY));
-  if (!FORCE && allRank && promo.today && promo.today.bdate === TODAY && promo.today.edate === TODAY) { log("오늘 다 받음 — 건너뜀"); return; }
+  const allAge = AGES.every((a) => (prev.listDates || {})["AGE_" + a] === TODAY);
+  if (!FORCE && allRank && allAge && promo.today && promo.today.bdate === TODAY && promo.today.edate === TODAY) { log("오늘 다 받음 — 건너뜀"); return; }
   try { P.ensureReady(); if (!adb("shell", "pm", "list", "packages", SPKG).includes(SPKG)) throw new Error("네이버 시리즈 앱이 설치돼 있지 않음"); }
   catch (e) { log("건너뜀:", e.message); return; }
   const idx = nameIndex(prev);
-  let R = null, banners = null, events = null;
+  let R = null, A = null, banners = null, events = null;
+  const st = thState(prev, idx);
   try {
     openApp();
     if (ONLY.includes("banner") && (FORCE || promo.today.bdate !== TODAY)) { try { banners = readBanners(promo.banners); } catch (e) { log("  홈 배너 실패:", e.message); } }
     if (ONLY.includes("event") && (FORCE || promo.today.edate !== TODAY)) { try { events = readEvents(promo.events); } catch (e) { log("  이벤트 실패:", e.message); } }
-    if (ONLY.includes("rank") && (FORCE || !allRank)) { try { R = readRanking(prev, idx); } catch (e) { log("  랭킹 실패:", e.message); } }
+    if (ONLY.includes("rank") && (FORCE || !allRank)) { try { R = readRanking(st); } catch (e) { log("  랭킹 실패:", e.message); } }
+    if (ONLY.includes("age") && (FORCE || !allAge)) { try { A = readAge(st); } catch (e) { log("  연령별 실패:", e.message); } }
   } catch (e) { log("실패:", e.message); }
   finally { try { adb("shell", "am", "force-stop", SPKG); } catch (e) {} P.finish(); }
 
@@ -364,11 +399,14 @@ function updateHistory(rank) {
     if (!DRY) fs.writeFileSync(F_PROMO, JSON.stringify(promo));
     paths.push("docs/data/series_app_promo.json");
   }
-  // 랭킹: 상품번호·표지 채우기(모르는 제목만 검색)
-  if (R && Object.values(R.rank).some((g) => Object.keys(g).length)) {
+  // 랭킹·연령별: 상품번호·표지 채우기(모르는 제목만 검색)
+  const lists = {};
+  if (R) for (const p in R.rank) for (const g in R.rank[p]) lists[p + "_" + g] = R.rank[p][g];
+  if (A) for (const a in A.age) lists["AGE_" + a] = A.age[a];
+  if (Object.keys(lists).length) {
     const names = { ...(prev.names || {}) };
     let searched = 0;
-    for (const p in R.rank) for (const g in R.rank[p]) for (const x of R.rank[p][g]) {
+    for (const key in lists) for (const x of lists[key]) {
       const k = norm(x.t);
       if (!idx[k] && !(k in names) && searched < 300) { const s = await searchSeries(x.t); searched++; if (s) { names[k] = s; idx[k] = s; } await new Promise((r) => setTimeout(r, 150)); }
       const e = idx[k] || names[k];
@@ -377,12 +415,14 @@ function updateHistory(rank) {
       if (th) x.th = th;
       if (e && e.id) names[k] = { id: e.id, th: (e && e.th) || "" };
     }
-    const out = { date: TODAY, updated: new Date().toISOString(), listDates: { ...(prev.listDates || {}) }, rank: { ...(prev.rank || {}) }, strips: { ...(prev.strips || {}) }, names };
-    for (const p in R.rank) { out.rank[p] = { ...(out.rank[p] || {}) }; for (const g in R.rank[p]) { out.rank[p][g] = R.rank[p][g]; out.listDates[p + "_" + g] = TODAY; out.strips[p + "_" + g] = R.strips[p + "_" + g] || ""; } }
-    const n = Object.values(R.rank).reduce((s, g) => s + Object.keys(g).length, 0), noId = Object.values(R.rank).flatMap((g) => Object.values(g).flat()).filter((x) => !x.id).length;
-    log(`  랭킹 ${n}개 목록 · 검색 ${searched}건 · 상품번호 못 찾은 칸 ${noId}`);
+    const out = { date: TODAY, updated: new Date().toISOString(), listDates: { ...(prev.listDates || {}) }, rank: { ...(prev.rank || {}) }, age: { ...(prev.age || {}) }, strips: { ...(prev.strips || {}) }, names };
+    if (R) for (const p in R.rank) { out.rank[p] = { ...(out.rank[p] || {}) }; for (const g in R.rank[p]) out.rank[p][g] = R.rank[p][g]; }
+    if (A) for (const a in A.age) out.age[a] = A.age[a];
+    for (const X of [R, A]) if (X) { Object.assign(out.listDates, X.dates); Object.assign(out.strips, X.strips); }
+    const noId = Object.values(lists).flat().filter((x) => !x.id).length;
+    log(`  랭킹 ${Object.keys(lists).length}개 목록(연령별 ${A ? Object.keys(A.age).length : 0}) · 검색 ${searched}건 · 상품번호 못 찾은 칸 ${noId}`);
     if (!DRY) fs.writeFileSync(F_RANK, JSON.stringify(out));
-    updateHistory(R.rank);
+    updateHistory(lists);
     paths.push("docs/data/series_app.json", "docs/data/series_app_history.json");
   }
   if (fs.existsSync(IMG)) paths.push("docs/data/series_app");

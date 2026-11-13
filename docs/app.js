@@ -99,6 +99,8 @@ const SOURCES = {
   done:    { label:"완결", variants:null, subs:()=>doneSubs(), data:(v,s)=>doneWorkSet(s), caps:{revenue:1,badge:1,done:1}, filters:F_MIN, sorts:[["fav","관심수순"],["total","총거래액순"],["per","회차당순"]], note:()=>`완결된 웹툰 · 장르·신작·성인 목록에서 옮겨 왔어요` },
   series:  { label:"시리즈", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>PERIODS, data:(v,s)=>SERIES&&SERIES[v]&&SERIES[v][platform]&&SERIES[v][platform][scat]&&SERIES[v][platform][scat][s], caps:{move:1,tiles:1,series:1,badge:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>platform==="app"?`${dot((SAPP&&SAPP.listDates&&SAPP.listDates[sub+"_"+scat])||(SAPP&&SAPP.date)||"")} · 시리즈 웹툰 · 앱(폰 화면) · ${scat} · 웹·모바일과 순위가 달라요 · 매일`:`${dot(SERIES.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · ${platform==="web"?"웹(PC)":"모바일"} · ${scat} · 자동` },
   promo:   { label:"무료·이벤트", variants:[["comic","웹툰"],["novel","웹소설"]], subs:()=>[["freeFromToday","오늘부터무료"],["timeDeal","타임딜"],["hourlyFree","매일무료"]], data:(v,s)=>PROMO&&PROMO[v]&&PROMO[v][s], caps:{badge:1,series:1}, filters:F_ONE, sorts:[], note:v=>`${dot(PROMO.date)} · 시리즈 ${v==="comic"?"웹툰":"웹소설"} · 무료·이벤트 · 자동` },
+  // 시리즈 앱 연령별랭킹(폰, 10~50대 × 여성·남성, 하루 1번 갱신) — series_app.json age["20대 여성"]
+  saage:   { label:"앱 연령별", variants:[["f","여성"],["m","남성"]], subs:()=>["10대","20대","30대","40대","50대"].map(a=>[a,a]), data:(v,s)=>SAPP&&SAPP.age&&SAPP.age[s+" "+(v==="m"?"남성":"여성")], caps:{move:1,tiles:1,series:1,badge:1}, filters:F_MOVE, sorts:S_MOVE, note:v=>{ const k="AGE_"+sub+" "+(v==="m"?"남성":"여성"); return SAPP&&SAPP.age?`${dot((SAPP.listDates&&SAPP.listDates[k])||SAPP.date)} · 시리즈 앱 연령별랭킹(폰 화면) · 웹툰(코믹스) · 하루 1번 갱신 · ▲▼ = 앱 표시`:"시리즈 앱 연령별랭킹 · 아직 데이터 없음"; } },
   // 앱에서만 나오는 홈 배너·이벤트 탭(폰 화면 캡처, series_app_promo.json). 지금 = 오늘 수집 때 떠 있던 것, 지난 것 = 그 뒤로 안 보인 것
   sapromo: { label:"앱 배너·이벤트", variants:[["banner","홈 배너"],["event","이벤트"]], subs:()=>[["now","지금"],["past","지난 것"]], data:()=>[], caps:{promoimg:1}, filters:[], sorts:[], note:v=>SAPROMO&&SAPROMO.date?`${dot(v==="banner"?SAPROMO.today.bdate:SAPROMO.today.edate)} · 시리즈 앱 ${v==="banner"?"홈 맨 위 슬라이드":"이벤트 탭"}(코믹스) · 폰 화면 캡처 · 노출 기간은 2026.11.12부터 기록`:"시리즈 앱 배너·이벤트 · 아직 데이터 없음" },
   revenue: { label:"매출순", variants:null, subs:()=>REVSUBS, data:(v,s)=>revenueWorkSet(s), caps:{revenue:1,badge:1}, filters:F_MIN, sorts:[["per","회차당순"],["total","총거래액순"],["deal","주단위거래액순"]], note:()=>`시리즈 거래 추정 · 단가=(대여×0.9+소장×0.1)×100 · 총거래액=다운수×단가 · 회차당=총거래액×0.9×0.6÷시리즈 회차수 · 주단위거래액=이번주−지난주 누적` },
@@ -283,7 +285,7 @@ function cohortHtml(d){
   return `<div class="rev" title="${esc(lab)}"><span class="rev-full">${big}</span><span class="rev-per">${esc(small)}</span></div>`;
 }
 function ensureLW(){ if(LW) return Promise.resolve(); if(!lwLoading) lwLoading=fetchJSON("data/launch_weeks.json").then(d=>{LW=d;}).catch(()=>{LW={works:{}};}); return lwLoading; }
-const GROUPS=[["naver","네이버웹툰",["app","appgenre","weekday","revenue","newworks","cohort","revchange","done"]],["series","시리즈",["series","promo","sapromo"]]];
+const GROUPS=[["naver","네이버웹툰",["app","appgenre","weekday","revenue","newworks","cohort","revchange","done"]],["series","시리즈",["series","saage","promo","sapromo"]]];
 let group="naver";
 const subLabel = s => (src==="app"||src==="appgenre") ? s : (SOURCES[src].subs().find(x=>x[0]===s)||[s,s])[1];
 const varLabel = () => { const vs=SOURCES[src].variants; return vs?(vs.find(x=>x[0]===variant)||["",""])[1]:""; };
@@ -662,6 +664,7 @@ function selectSrc(k){
   if(k==="weekday" && !APPWD){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureAppWd().then(()=>{ if(src==="weekday"){ renderSubnav(); renderView(); } }); return; }
   if(k==="appgenre" && !AGEN){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureAgen().then(()=>{ if(src!=="appgenre") return; document.getElementById("gwsel").style.display=(AGEN_IDX&&AGEN_IDX.weeks.length>1)?"":"none"; renderSubnav(); renderView(); }); return; }
   if(k==="promo" && !PROMO){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensurePromo().then(()=>renderView()); return; }
+  if(k==="saage" && !SERIES){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureSeries().then(()=>{ if(src==="saage") renderView(); }); return; }
   if(k==="sapromo") ensureSeries();   // 이벤트 창의 작품 → 시리즈 상품번호(없으면 검색 링크)
   if(k==="sapromo" && !SAPROMO){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureSAPromo().then(()=>{ if(src==="sapromo") renderView(); }); return; }
   if((k==="revenue"||k==="newworks"||k==="revchange"||k==="done") && (!SERIES||!SERIESDET||!DETAILS||((k==="revchange"||k==="newworks")&&!REVHIST))){ document.getElementById("board").innerHTML=`<li class="empty">${k==="newworks"?"신작":k==="revchange"?"매출 변동":k==="done"?"완결":"매출"} 데이터 불러오는 중…</li>`; Promise.all([ensureSeries(),ensureSeriesDetails(),ensureDetails(),ensureRevHist()]).then(()=>{ SNAMEIDX=null; renderView(); }); return; }
@@ -1162,7 +1165,7 @@ function revChangeHtml(d){
 
 const searchUrl = t => `https://search.naver.com/search.naver?query=${encodeURIComponent(t+" 웹툰")}`;
 function urlFor(d){
-  if(SOURCES[src].caps.series) return d.id?`https://series.naver.com/${variant}/detail.series?productNo=${d.id}`:searchUrl(d.name);
+  if(SOURCES[src].caps.series) return d.id?`https://series.naver.com/${variant==="novel"?"novel":"comic"}/detail.series?productNo=${d.id}`:searchUrl(d.name);   // 앱 연령별은 variant가 여성/남성
   return d.id?`https://comic.naver.com/webtoon/list?titleId=${d.id}`:searchUrl(d.name);
 }
 function ensureDetails(){ if(DETAILS) return Promise.resolve(DETAILS); if(!detailsLoading) detailsLoading=fetchJSON("data/details.json").then(d=>{DETAILS=d; buildKwIndex(); return d;}).catch(()=>DETAILS={}); return detailsLoading; }
