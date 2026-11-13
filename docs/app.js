@@ -322,10 +322,13 @@ async function boot(){
   selectGroup("naver");
 }
 function fail(){ document.getElementById("board").innerHTML=`<li class="empty">데이터를 불러오지 못했어요. 새로고침 해주세요.</li>`; }
+/* 시리즈 앱(폰) 순위 원본 — 시리즈 탭과 요일별(연령 뱃지)이 같이 씀 */
+let sappLoading=null;
+function ensureSApp(){ if(SAPP) return Promise.resolve(); if(!sappLoading) sappLoading=fetchJSON("data/series_app.json").catch(()=>({})).then(a=>{ SAPP=a||{}; }); return sappLoading; }
 function ensureSeries(){ if(SERIES) return Promise.resolve(); if(!seriesLoading) seriesLoading=Promise.all([
     fetchJSON("data/series.json").catch(()=>({date:"",comic:{},novel:{}})),
-    fetchJSON("data/series_app.json").catch(()=>null)
-  ]).then(([d,a])=>{ SERIES=d; SAPP=a;
+    ensureSApp()
+  ]).then(([d])=>{ SERIES=d; const a=SAPP;
     // 앱 순위 rank[기간][장르] → 웹·모바일과 같은 꼴 SERIES.comic.app[장르][기간]
     if(a&&a.rank){ const t=(SERIES.comic||(SERIES.comic={})).app={}; for(const p in a.rank) for(const g in a.rank[p]) (t[g]||(t[g]={}))[p]=a.rank[p][g]; }
   }); return seriesLoading; }
@@ -661,7 +664,7 @@ function selectSrc(k){
   document.getElementById("q").value="";
   if(k==="series" && !SERIES){ document.getElementById("board").innerHTML=`<li class="empty">시리즈 불러오는 중…</li>`; ensureSeries().then(()=>{ setupSeriesCtl(); renderView(); }); return; }
   if(k==="cohort" && (!LW||!SERIESDET||!DETAILS)){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; Promise.all([ensureLW(), ensureSeriesDetails(), ensureDetails()]).then(()=>{ if(src!=="cohort") return; sub=SOURCES.cohort.subs()[0][0]; renderSubnav(); renderView(); }); return; }
-  if(k==="weekday" && !APPWD){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureAppWd().then(()=>{ if(src==="weekday"){ renderSubnav(); renderView(); } }); return; }
+  if(k==="weekday" && (!APPWD||!SAPP)){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; Promise.all([ensureAppWd(),ensureSApp()]).then(()=>{ if(src==="weekday"){ renderSubnav(); renderView(); } }); return; }
   if(k==="appgenre" && !AGEN){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureAgen().then(()=>{ if(src!=="appgenre") return; document.getElementById("gwsel").style.display=(AGEN_IDX&&AGEN_IDX.weeks.length>1)?"":"none"; renderSubnav(); renderView(); }); return; }
   if(k==="promo" && !PROMO){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensurePromo().then(()=>renderView()); return; }
   if(k==="saage" && !SERIES){ document.getElementById("board").innerHTML=`<li class="empty">불러오는 중…</li>`; ensureSeries().then(()=>{ if(src==="saage") renderView(); }); return; }
@@ -999,6 +1002,28 @@ function moveHtml(m){
 const ORIG_P={series:"네이버 시리즈",munpia:"문피아",kakao:"카카오페이지",ridi:"리디"};
 const origOf = id => (id!=null && ORIGINS && ORIGINS.works && ORIGINS.works[id]) || null;
 const isOrig = id => !!(origOf(id) || (id!=null && DETAILS && DETAILS[id] && DETAILS[id].novel));
+/* 시리즈 앱 연령별 순위(10~50대 × 여성·남성, 각 100위) → 제목별 {연령: 순위}. 같은 이름이면 웹툰판을 단행본보다 먼저 */
+const AGE_ORDER=["10대 여성","20대 여성","30대 여성","40대 여성","50대 여성","10대 남성","20대 남성","30대 남성","40대 남성","50대 남성"];
+let SAGEIDX=null;
+function sageIndex(){
+  if(SAGEIDX||!SAPP||!SAPP.age) return SAGEIDX;
+  const idx={};
+  for(const g in SAPP.age) for(const it of SAPP.age[g]||[]){ const n=normName(it.t), bk=/\[단행본\]\s*$/.test(it.t), e=idx[n]||(idx[n]={}), o=e[g];
+    if(!o || (o.bk&&!bk) || (o.bk===bk&&it.r<o.r)) e[g]={r:it.r,bk}; }
+  return SAGEIDX=idx;
+}
+function ageBadge(name){
+  const ix=sageIndex(), e=ix&&ix[normName(name)]; if(!e) return "";
+  const best=Math.min(...Object.values(e).map(x=>x.r)), tops=AGE_ORDER.filter(g=>e[g]&&e[g].r===best);
+  const f=tops.filter(g=>g.endsWith("여성")).map(g=>g.slice(0,2)), m=tops.filter(g=>g.endsWith("남성")).map(g=>g.slice(0,2));
+  const part=(a,s)=>a.length?a.join("·")+"대 "+s:"";
+  const lab=[part(f,"여"),part(m,"남")].filter(Boolean).join(" · ")+" "+best+"위";
+  const cls=f.length&&!m.length?"b-age-f":m.length&&!f.length?"b-age-m":"";
+  const ld=SAPP.listDates||{}, dt=ld["AGE_"+tops[0]]||SAPP.date||"";
+  const line=s=>s+"  "+["10대","20대","30대","40대","50대"].map(a=>{ const x=e[a+" "+s]; return a+" "+(x?x.r+"위":"-"); }).join(" · ");
+  const tip=`시리즈 앱 연령별 순위${dt?" · "+dot(dt).slice(5):""} (100위 밖은 -)\n${line("여성")}\n${line("남성")}`+(Object.values(e).some(x=>x.bk)?"\n(시리즈에는 단행본으로 있어 단행본 순위)":"");
+  return `<span class="badge b-age ${cls}" title="${esc(tip)}">${esc(lab)}</span>`;
+}
 function badgeHtml(d){
   let h=""; const b=d.b||[];
   if(DAILYPLUS.has(d.id)) h+=`<span class="badge b-daily">매일+</span>`;
@@ -1012,6 +1037,7 @@ function badgeHtml(d){
   if(b.includes("완결")) h+=`<span class="badge b-fin">완결</span>`;
   if(b.includes("휴재")) h+=`<span class="badge b-rest">휴재</span>`;
   if(b.includes("UP")) h+=`<span class="badge b-up">UP</span>`;
+  if(src==="weekday") h+=ageBadge(d.name);   // 시리즈 앱 연령별 순위에서 가장 높은 연령·성별
   if(b.includes("19금")) h+=`<span class="badge b-adult">19금</span>`;
   if(b.includes("매일무료")) h+=`<span class="badge b-free">매일무료</span>`;
   if(b.includes("18세")) h+=`<span class="badge b-adult">18세</span>`;

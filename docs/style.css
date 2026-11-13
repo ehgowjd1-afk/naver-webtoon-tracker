@@ -6,6 +6,7 @@
   --up:#e03a40; --up-soft:#fce7e7; --down:#2b7fe0; --down-soft:#e5eefb; --same:#93a09a;
   --gold:#c79a2e; --shadow:0 1px 2px rgba(20,40,30,.05),0 8px 24px -12px rgba(20,40,30,.12);
   --thumb-bg:#e7ece8;
+  --fem:#c23a78; --fem-soft:#fbe8f1; --mal:#5b4fd1; --mal-soft:#ecebfc;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
   --ground:#0c110e; --surface:#141b17; --surface-2:#1b241f; --row:#151d18; --row-hi:#12241a;
@@ -15,6 +16,7 @@
   --up:#ff5b60; --up-soft:#331416; --down:#54a2ff; --down-soft:#0f2540; --same:#7c877f;
   --gold:#e3b64e; --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6);
   --thumb-bg:#222c26;
+  --fem:#f07aae; --fem-soft:#3a1626; --mal:#a49bff; --mal-soft:#211d42;
 }}
 :root[data-theme="dark"]{
   --ground:#0c110e; --surface:#141b17; --surface-2:#1b241f; --row:#151d18; --row-hi:#12241a;
@@ -24,6 +26,7 @@
   --up:#ff5b60; --up-soft:#331416; --down:#54a2ff; --down-soft:#0f2540; --same:#7c877f;
   --gold:#e3b64e; --shadow:0 1px 2px rgba(0,0,0,.3),0 10px 30px -14px rgba(0,0,0,.6);
   --thumb-bg:#222c26;
+  --fem:#f07aae; --fem-soft:#3a1626; --mal:#a49bff; --mal-soft:#211d42;
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -428,6 +431,10 @@ footer a:hover{text-decoration:underline}
 
 /* 원작 웹소설 */
 .b-orig{background:transparent; color:var(--gold); border:1px solid var(--gold); font-size:9.5px; padding:1px 5px}
+/* 요일별: 시리즈 앱 연령별 순위에서 가장 높은 연령·성별 */
+.b-age{background:var(--surface-2); color:var(--muted); font-size:9.5px; padding:1px 6px; cursor:help}
+.b-age-f{background:var(--fem-soft); color:var(--fem)}
+.b-age-m{background:var(--mal-soft); color:var(--mal)}
 .morig{margin:12px 0 4px; padding:10px 12px; border:1px solid var(--border); border-radius:10px; background:var(--surface-2)}
 .morig .ohead{font-size:12.5px; font-weight:700; color:var(--ink); display:flex; flex-wrap:wrap; gap:6px; align-items:baseline}
 .morig .otitle{font-weight:600}
