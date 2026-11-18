@@ -5,6 +5,8 @@ cd /d "%~dp0.."
 set NODE_EXE=C:\Program Files\nodejs\node.exe
 if not exist "%NODE_EXE%" set NODE_EXE=node
 "%NODE_EXE%" scripts\collect_local.js --push >> scripts\local_last_run.log 2>&1
+REM 폰이 연결돼 있지 않으면 연결될 때까지(23:00까지) 기다렸다가 아래 폰 수집으로 넘어감. 사용자가 늦게 꽂아도 그때 요일·시리즈 순위가 돎.
+"%NODE_EXE%" scripts\wait_phone.js >> scripts\local_last_run.log 2>&1
 REM 앱 「이번 주 웹툰 랭킹」 전체/여성/남성 100위(폰). 새 주 순위가 나왔고 그 주 파일이 없을 때만 저장(손으로 넣은 파일은 안 덮음).
 "%NODE_EXE%" scripts\collect_app_weekly.js --push >> scripts\local_last_run.log 2>&1
 REM 앱 장르 주간랭킹 100위(USB 연결한 안드로이드 폰 화면 읽기). 폰 없거나 잠겨 있으면 자동 스킵, 이번 주 다 받았으면 스킵.
