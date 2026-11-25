@@ -1,10 +1,11 @@
-/* 원작 웹소설 찾기 — 네이버웹툰 '소설원작'(details.novel) 작품마다 원작이 어느 플랫폼에 있는지.
+/* 원작 웹소설 연결 — 네이버웹툰 '소설원작'(details.novel) 작품마다 네이버 시리즈 웹소설 원작을 찾아 연결.
  * 원작 작가 = 네이버 작품 정보 API의 communityArtists 중 ARTIST_NOVEL_ORIGIN(로그아웃·성인작도 열림).
- * 플랫폼별 검색(scripts/lib/origin/*.cjs) — 소설만, 원작 작가 이름 일치 + 제목 같은 작품만 받음(정확도 우선, 2026-10-20 표본 36편 검증: 틀린 연결 0).
- *   series(네이버 시리즈 웹소설) · munpia(문피아) · kakao(카카오페이지 웹소설) · ridi(리디 — 클라우드플레어 때문에 fetch→curl→python 순서로 시도)
- * 결과: docs/data/origins.json = {updated, works:{titleId:{t, a:[원작 작가], at, ck:[확인한 플랫폼], h:[{p,t,u,n?,v?,d?,ad?}]}}}
- *   h = 플랫폼마다 대표 1개(본편 연재판 우선). n=회차 수, v=권 수, d=완결, ad=19금.
- * 실행: node scripts/collect_origins.js [--max=40] [--stale=30] [--only=id,id] [--platforms=series,munpia,kakao,ridi]
+ * 시리즈 웹소설 검색(scripts/lib/origin/series.cjs) — 소설만, 원작 작가 이름 일치 + 제목 같은 작품만 받음(정확도 우선, 2026-10-20 표본 36편 검증: 틀린 연결 0).
+ *   2026-11-25부터 네이버 시리즈만 찾음(사용자 결정). 문피아·카카오페이지·리디 검색은 뺌 — 리디는 클라우드플레어 차단을
+ *   다른 연결 방식으로 돌아가던 코드라 같은 계정의 ridi-tracker가 GitHub 약관 위반으로 막힌 뒤 없앰. 시리즈에 470작 중 465작이 있음.
+ * 결과: docs/data/origins.json = {updated, works:{titleId:{t, a:[원작 작가], at, ck:["series"], h:[{p,t,u,n?,v?,d?,ad?}]}}}
+ *   h = 대표 1개(본편 연재판 우선). n=회차 수, v=권 수, d=완결, ad=19금.
+ * 실행: node scripts/collect_origins.js [--max=40] [--stale=30] [--only=id,id]
  *   새 작품 → 오래된(stale일 지난) 작품 순. 클라우드 collect.yml이 매일 --max=40, 처음 채우기는 로컬에서 --max=1000.
  */
 const fs = require("fs");
@@ -16,7 +17,7 @@ const FILE = path.join(OUT, "origins.json");
 const arg = (k, d) => { const a = process.argv.find((x) => x.startsWith(`--${k}=`)); return a ? a.slice(k.length + 3) : d; };
 const MAX = +arg("max", 40), STALE = +arg("stale", 30);
 const ONLY = arg("only", "") ? new Set(arg("only", "").split(",").map(Number)) : null;
-const PLATFORMS = arg("platforms", "series,munpia,kakao,ridi").split(",").filter(Boolean);
+const PLATFORMS = ["series"];   // 네이버 시리즈 웹소설만(2026-11-25)
 const MODS = Object.fromEntries(PLATFORMS.map((p) => [p, require(`./lib/origin/${p}.cjs`)]));
 const UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

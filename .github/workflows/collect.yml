@@ -43,7 +43,7 @@ jobs:
       - name: 수집
         if: steps.guard.outputs.done == 'false'
         run: node scripts/collect.js
-      - name: 원작 웹소설 찾기(새 작품·30일 지난 작품 40개)
+      - name: 원작 시리즈 웹소설 연결(새 작품·30일 지난 작품 40개)
         if: steps.guard.outputs.done == 'false'
         run: node scripts/collect_origins.js --max=40 || echo "원작 찾기 실패 — 넘어감"
       - name: 커밋 & 푸시
